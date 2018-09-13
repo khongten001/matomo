@@ -16,10 +16,11 @@ class HtmlEmailFooterView extends View
 {
     const TEMPLATE_FILE = '@CoreHome/ReportRenderer/_htmlReportFooter';
 
-    public function __construct()
+    public function __construct($unsubscribeLink = null)
     {
         parent::__construct(self::TEMPLATE_FILE);
 
         $this->hasWhiteLabel = \Piwik\Plugin\Manager::getInstance()->isPluginLoaded('WhiteLabel');
+        $this->unsubscribeLink = $unsubscribeLink;
     }
 }
