@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -17,38 +17,14 @@ use Piwik\Translation\Translator;
  */
 class NumberFormatter
 {
-    /** @var string language specific patterns for numbers */
-    protected $patternNumber;
+    /** @var Translator */
+    protected $translator;
 
-    /** @var string language specific pattern for percent numbers */
-    protected $patternPercent;
+    /** @var array cached patterns per language */
+    protected $patterns;
 
-    /** @var string language specific pattern for currency numbers */
-    protected $patternCurrency;
-
-    /** @var string language specific plus sign */
-    protected $symbolPlus;
-
-    /** @var string language specific minus sign */
-    protected $symbolMinus;
-
-    /** @var string language specific percent sign */
-    protected $symbolPercent;
-
-    /** @var string language specific symbol used as decimal separator */
-    protected $symbolDecimal;
-
-    /** @var string language specific symbol used as group separator */
-    protected $symbolGroup;
-
-    /** @var bool indicates if language uses grouping for numbers */
-    protected $usesGrouping;
-
-    /** @var int language specific size for primary group numbers */
-    protected $primaryGroupSize;
-
-    /** @var int language specific size for secondary group numbers */
-    protected $secondaryGroupSize;
+    /** @var array cached symbols per language */
+    protected $symbols;
 
     /**
      * Loads all required data from Intl plugin
@@ -62,14 +38,7 @@ class NumberFormatter
      */
     public function __construct(Translator $translator)
     {
-        $this->patternNumber = $translator->translate('Intl_NumberFormatNumber');
-        $this->patternCurrency = $translator->translate('Intl_NumberFormatCurrency');
-        $this->patternPercent = $translator->translate('Intl_NumberFormatPercent');
-        $this->symbolPlus = $translator->translate('Intl_NumberSymbolPlus');
-        $this->symbolMinus = $translator->translate('Intl_NumberSymbolMinus');
-        $this->symbolPercent = $translator->translate('Intl_NumberSymbolPercent');
-        $this->symbolGroup = $translator->translate('Intl_NumberSymbolGroup');
-        $this->symbolDecimal = $translator->translate('Intl_NumberSymbolDecimal');
+        $this->translator = $translator;
     }
 
     /**
@@ -96,7 +65,7 @@ class NumberFormatter
      * @param int $minimumFractionDigits
      * @return mixed|string
      */
-    public function format($value, $maximumFractionDigits=0, $minimumFractionDigits=0)
+    public function format($value, $maximumFractionDigits = 0, $minimumFractionDigits = 0)
     {
         if (is_string($value)
             && trim($value, '%') != $value
@@ -117,16 +86,9 @@ class NumberFormatter
      * @param int $minimumFractionDigits
      * @return mixed|string
      */
-    public function formatNumber($value, $maximumFractionDigits=0, $minimumFractionDigits=0)
+    public function formatNumber($value, $maximumFractionDigits = 0, $minimumFractionDigits = 0)
     {
-
-        static $positivePattern, $negativePattern;
-
-        if (empty($positivePatter) || empty($negativePattern)) {
-            list($positivePattern, $negativePattern) = $this->parsePattern($this->patternNumber);
-        }
-        $negative = $this->isNegative($value);
-        $pattern = $negative ? $negativePattern : $positivePattern;
+        $pattern = $this->getPattern($value, 'Intl_NumberFormatNumber');
 
         return $this->formatNumberWithPattern($pattern, $value, $maximumFractionDigits, $minimumFractionDigits);
     }
@@ -138,21 +100,14 @@ class NumberFormatter
      * @param int $minimumFractionDigits
      * @return mixed|string
      */
-    public function formatPercent($value, $maximumFractionDigits=0, $minimumFractionDigits=0)
+    public function formatPercent($value, $maximumFractionDigits = 0, $minimumFractionDigits = 0)
     {
-        static $positivePattern, $negativePattern;
-
-        if (empty($positivePatter) || empty($negativePattern)) {
-            list($positivePattern, $negativePattern) = $this->parsePattern($this->patternPercent);
-        }
-
-        $newValue =  trim($value, " \0\x0B%");
+        $newValue = trim($value, " \0\x0B%");
         if (!is_numeric($newValue)) {
             return $value;
         }
 
-        $negative = $this->isNegative($value);
-        $pattern = $negative ? $negativePattern : $positivePattern;
+        $pattern = $this->getPattern($value, 'Intl_NumberFormatPercent');
 
         return $this->formatNumberWithPattern($pattern, $newValue, $maximumFractionDigits, $minimumFractionDigits);
     }
@@ -166,12 +121,14 @@ class NumberFormatter
      */
     public function formatPercentEvolution($value)
     {
-        $isPositiveEvolution = !empty($value) && ($value > 0 || $value[0] == '+');
+        $isPositiveEvolution = !empty($value) && ($value > 0 || substr($value, 0, 1) === '+');
 
         $formatted = self::formatPercent($value);
 
-        if($isPositiveEvolution) {
-            return $this->symbolPlus . $formatted;
+        if ($isPositiveEvolution) {
+            // $this->symbols has already been initialized from formatPercent().
+            $language = $this->translator->getCurrentLanguage();
+            return $this->symbols[$language]['+'] . $formatted;
         }
         return $formatted;
     }
@@ -183,21 +140,14 @@ class NumberFormatter
      * @param int $precision
      * @return mixed|string
      */
-    public function formatCurrency($value, $currency, $precision=2)
+    public function formatCurrency($value, $currency, $precision = 2)
     {
-        static $positivePattern, $negativePattern;
-
-        if (empty($positivePatter) || empty($negativePattern)) {
-            list($positivePattern, $negativePattern) = $this->parsePattern($this->patternCurrency);
-        }
-
-        $newValue =  trim($value, " \0\x0B$currency");
+        $newValue = trim(strval($value), " \0\x0B$currency");
         if (!is_numeric($newValue)) {
             return $value;
         }
 
-        $negative = $this->isNegative($value);
-        $pattern = $negative ? $negativePattern : $positivePattern;
+        $pattern = $this->getPattern($value, 'Intl_NumberFormatCurrency');
 
         if ($newValue == round($newValue)) {
             // if no fraction digits available, don't show any
@@ -211,6 +161,27 @@ class NumberFormatter
     }
 
     /**
+     * Returns the relevant pattern for the given number.
+     *
+     * @param string $value
+     * @param string $translationId
+     * @return string
+     */
+    protected function getPattern($value, $translationId)
+    {
+        $language = $this->translator->getCurrentLanguage();
+
+        if (!isset($this->patterns[$language][$translationId])) {
+            $this->patterns[$language][$translationId] = $this->parsePattern($this->translator->translate($translationId));
+        }
+
+        list($positivePattern, $negativePattern) = $this->patterns[$language][$translationId];
+        $negative = $this->isNegative($value);
+
+        return $negative ? $negativePattern : $positivePattern;
+    }
+
+    /**
      * Formats the given number with the given pattern
      *
      * @param string $pattern
@@ -219,21 +190,21 @@ class NumberFormatter
      * @param int $minimumFractionDigits
      * @return mixed|string
      */
-    protected function formatNumberWithPattern($pattern, $value, $maximumFractionDigits=0, $minimumFractionDigits=0)
+    protected function formatNumberWithPattern($pattern, $value, $maximumFractionDigits = 0, $minimumFractionDigits = 0)
     {
         if (!is_numeric($value)) {
             return $value;
         }
 
-        $this->usesGrouping = (strpos($pattern, ',') !== false);
+        $usesGrouping = (strpos($pattern, ',') !== false);
         // if pattern has number groups, parse them.
-        if ($this->usesGrouping) {
+        if ($usesGrouping) {
             preg_match('/#+0/', $pattern, $primaryGroupMatches);
-            $this->primaryGroupSize = $this->secondaryGroupSize = strlen($primaryGroupMatches[0]);
+            $primaryGroupSize = $secondaryGroupSize = strlen($primaryGroupMatches[0]);
             $numberGroups = explode(',', $pattern);
             // check for distinct secondary group size.
             if (count($numberGroups) > 2) {
-                $this->secondaryGroupSize = strlen($numberGroups[1]);
+                $secondaryGroupSize = strlen($numberGroups[1]);
             }
         }
 
@@ -248,14 +219,14 @@ class NumberFormatter
         // Account for maximumFractionDigits = 0, where the number won't
         // have a decimal point, and $valueParts[1] won't be set.
         $minorDigits = isset($valueParts[1]) ? $valueParts[1] : '';
-        if ($this->usesGrouping) {
+        if ($usesGrouping) {
             // Reverse the major digits, since they are grouped from the right.
             $majorDigits = array_reverse(str_split($majorDigits));
             // Group the major digits.
             $groups = array();
-            $groups[] = array_splice($majorDigits, 0, $this->primaryGroupSize);
+            $groups[] = array_splice($majorDigits, 0, $primaryGroupSize);
             while (!empty($majorDigits)) {
-                $groups[] = array_splice($majorDigits, 0, $this->secondaryGroupSize);
+                $groups[] = array_splice($majorDigits, 0, $secondaryGroupSize);
             }
             // Reverse the groups and the digits inside of them.
             $groups = array_reverse($groups);
@@ -265,7 +236,7 @@ class NumberFormatter
             // Reconstruct the major digits.
             $majorDigits = implode(',', $groups);
         }
-        if ($minimumFractionDigits < $maximumFractionDigits) {
+        if ($minimumFractionDigits <= $maximumFractionDigits) {
             // Strip any trailing zeroes.
             $minorDigits = rtrim($minorDigits, '0');
             if (strlen($minorDigits) < $minimumFractionDigits) {
@@ -295,14 +266,19 @@ class NumberFormatter
      */
     protected function replaceSymbols($value)
     {
-        $replacements = array(
-            '.' => $this->symbolDecimal,
-            ',' => $this->symbolGroup,
-            '+' => $this->symbolPlus,
-            '-' => $this->symbolMinus,
-            '%' => $this->symbolPercent,
-        );
-        return strtr($value, $replacements);
+        $language = $this->translator->getCurrentLanguage();
+
+        if (!isset($this->symbols[$language])) {
+            $this->symbols[$language] = array(
+                '.' => $this->translator->translate('Intl_NumberSymbolDecimal'),
+                ',' => $this->translator->translate('Intl_NumberSymbolGroup'),
+                '+' => $this->translator->translate('Intl_NumberSymbolPlus'),
+                '-' => $this->translator->translate('Intl_NumberSymbolMinus'),
+                '%' => $this->translator->translate('Intl_NumberSymbolPercent'),
+            );
+        }
+
+        return strtr($value, $this->symbols[$language]);
     }
 
     /**
@@ -320,6 +296,12 @@ class NumberFormatter
      */
     public static function getInstance()
     {
-        return StaticContainer::get('Piwik\NumberFormatter');
+        return StaticContainer::get(NumberFormatter::class);
+    }
+
+    public function clearCache()
+    {
+        $this->patterns = [];
+        $this->symbols = [];
     }
 }

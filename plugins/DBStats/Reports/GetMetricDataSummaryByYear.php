@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,7 +10,6 @@ namespace Piwik\Plugins\DBStats\Reports;
 
 use Piwik\Piwik;
 use Piwik\Plugin\ViewDataTable;
-use Piwik\Plugins\CoreVisualizations\Visualizations\Graph;
 use Piwik\Plugin\ReportsProvider;
 
 /**
@@ -39,5 +38,4 @@ class GetMetricDataSummaryByYear extends Base
             ReportsProvider::factory('DBStats', 'getMetricDataSummary'),
         );
     }
-
 }

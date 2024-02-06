@@ -1,18 +1,19 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik;
 
 use Exception;
+use Piwik\CliMulti\Process;
 use Piwik\Container\StaticContainer;
 use Piwik\Intl\Data\Provider\LanguageDataProvider;
 use Piwik\Intl\Data\Provider\RegionDataProvider;
-use Piwik\Plugins\UserCountry\LocationProvider\DefaultProvider;
+use Piwik\Log\LoggerInterface;
 use Piwik\Tracker\Cache as TrackerCache;
 
 /**
@@ -69,13 +70,13 @@ class Common
     /**
      * Returns an array containing the prefixed table names of every passed argument.
      *
-     * @param string ... The table names to prefix, ie "log_visit"
+     * @param string ...$tables The table names to prefix, ie "log_visit"
      * @return array The prefixed names in an array.
      */
-    public static function prefixTables()
+    public static function prefixTables(...$tables)
     {
         $result = array();
-        foreach (func_get_args() as $table) {
+        foreach ($tables as $table) {
             $result[] = self::prefixTable($table);
         }
         return $result;
@@ -131,14 +132,14 @@ class Common
             return self::$isCliMode;
         }
 
-        if(PHP_SAPI == 'cli'){
+        if(PHP_SAPI === 'cli'){
             return true;
         }
-        
+
         if(self::isPhpCgiType() && (!isset($_SERVER['REMOTE_ADDR']) || empty($_SERVER['REMOTE_ADDR']))){
             return true;
         }
-        
+
         return false;
     }
 
@@ -183,21 +184,38 @@ class Common
      *
      * @param string $string
      * @param int $start
-     * @param int ...      optional length
+     * @param int|null $length      optional length
      * @return string
-     * @api
+     * @deprecated since 4.4 - directly use mb_substr instead
      */
-    public static function mb_substr($string, $start)
+    public static function mb_substr($string, $start, $length = null) // phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps
     {
-        $length = func_num_args() > 2
-            ? func_get_arg(2)
-            : self::mb_strlen($string);
+        return mb_substr($string, $start, $length, 'UTF-8');
+    }
 
-        if (function_exists('mb_substr')) {
-            return mb_substr($string, $start, $length, 'UTF-8');
+    /**
+     * Gets the current process ID.
+     * Note: If getmypid is disabled, a random ID will be generated once and used throughout the request. There is a
+     * small chance that two processes at the same time may generated the same random ID. If you need to rely on the
+     * value being 100% unique, then you may need to use `getmypid` directly or some other logic. Eg in CliMulti it is
+     * fine to use `getmypid` directly as the logic won't be used if getmypid is disabled...
+     * If you are wanting to use the pid to check if the process is running eg using `ps`, then you also have to use
+     * getmypid directly.
+     *
+     * @return int|null
+     */
+    public static function getProcessId()
+    {
+        static $pid;
+        if (!isset($pid)) {
+            if (Process::isMethodDisabled('getmypid')) {
+                $pid = Common::getRandomInt(12);
+            } else {
+                $pid = \getmypid();
+            }
         }
 
-        return substr($string, $start, $length);
+        return $pid;
     }
 
     /**
@@ -207,15 +225,11 @@ class Common
      *
      * @param string $string
      * @return int
-     * @api
+     * @deprecated since 4.4 - directly use mb_strlen instead
      */
-    public static function mb_strlen($string)
+    public static function mb_strlen($string) // phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps
     {
-        if (function_exists('mb_strlen')) {
-            return mb_strlen($string, 'UTF-8');
-        }
-
-        return strlen($string);
+        return mb_strlen($string, 'UTF-8');
     }
 
     /**
@@ -225,16 +239,11 @@ class Common
      *
      * @param string $string
      * @return string
-     * @api
+     * @deprecated since 4.4 - directly use mb_strtolower instead
      */
-    public static function mb_strtolower($string)
+    public static function mb_strtolower($string) // phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps
     {
-        if (function_exists('mb_strtolower')) {
-            return mb_strtolower($string, 'UTF-8');
-        }
-
-        // return unchanged string as using `strtolower` might cause unicode problems
-        return $string;
+        return mb_strtolower($string, 'UTF-8');
     }
 
     /**
@@ -244,16 +253,64 @@ class Common
      *
      * @param string $string
      * @return string
-     * @api
+     * @deprecated since 4.4 - directly use mb_strtoupper instead
      */
-    public static function mb_strtoupper($string)
+    public static function mb_strtoupper($string) // phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps
     {
-        if (function_exists('mb_strtoupper')) {
-            return mb_strtoupper($string, 'UTF-8');
+        return mb_strtoupper($string, 'UTF-8');
+    }
+
+    /**
+     * Timing attack safe string comparison.
+     *
+     * @param string $stringA
+     * @param string $stringB
+     * @return bool
+     */
+    public static function hashEquals(string $stringA, string $stringB)
+    {
+        if (function_exists('hash_equals')) {
+            return hash_equals($stringA, $stringB);
         }
 
-        // return unchanged string as using `strtoupper` might cause unicode problems
-        return $string;
+        if (strlen($stringA) !== strlen($stringB)) {
+            return false;
+        }
+
+        $result = "\0";
+        $stringA ^= $stringB;
+        for ($i = 0; $i < strlen($stringA); $i++) {
+            $result |= $stringA[$i];
+        }
+
+        return $result === "\0";
+    }
+
+    /**
+     * Secure wrapper for unserialize, which by default disallows unserializing classes
+     *
+     * @param string $string String to unserialize
+     * @param array $allowedClasses Class names that should be allowed to unserialize
+     * @param bool $rethrow Whether to rethrow exceptions or not.
+     * @return mixed
+     */
+    public static function safe_unserialize($string, $allowedClasses = [], $rethrow = false)  // phpcs:ignore PSR1.Methods.CamelCapsMethodName.NotCamelCaps
+    {
+        try {
+            // phpcs:ignore Generic.PHP.ForbiddenFunctions
+            return unserialize($string ?? '', ['allowed_classes' => empty($allowedClasses) ? false : $allowedClasses]);
+        } catch (\Throwable $e) {
+            if ($rethrow) {
+                throw $e;
+            }
+
+            $logger = StaticContainer::get(LoggerInterface::class);
+            $logger->debug('Unable to unserialize a string: {exception} (string = {string})', [
+                'exception' => $e,
+                'string' => $string,
+            ]);
+            return false;
+        }
     }
 
     /*
@@ -298,7 +355,7 @@ class Common
             foreach (array_keys($value) as $key) {
                 $newKey = $key;
                 $newKey = self::sanitizeInputValues($newKey, $alreadyStripslashed);
-                if ($key != $newKey) {
+                if ($key !== $newKey) {
                     $value[$newKey] = $value[$key];
                     unset($value[$key]);
                 }
@@ -345,7 +402,7 @@ class Common
         $tmp = @htmlspecialchars($value, self::HTML_ENCODING_QUOTE_STYLE, 'UTF-8');
 
         // note: php 5.2.5 and above, htmlspecialchars is destructive if input is not UTF-8
-        if ($value != '' && $tmp == '') {
+        if ($value !== '' && $tmp === '') {
             // convert and escape
             $value = utf8_encode($value);
             $tmp = htmlspecialchars($value, self::HTML_ENCODING_QUOTE_STYLE, 'UTF-8');
@@ -363,7 +420,7 @@ class Common
      */
     public static function unsanitizeInputValue($value)
     {
-        return htmlspecialchars_decode($value, self::HTML_ENCODING_QUOTE_STYLE);
+        return htmlspecialchars_decode($value ?? '', self::HTML_ENCODING_QUOTE_STYLE);
     }
 
     /**
@@ -399,7 +456,7 @@ class Common
      */
     public static function sanitizeLineBreaks($value)
     {
-        return str_replace(array("\n", "\r"), '', $value);
+        return is_null($value) ? '' : str_replace(array("\n", "\r"), '', $value);
     }
 
     /**
@@ -431,6 +488,8 @@ class Common
      * @throws Exception If the request parameter doesn't exist and there is no default value, or if the request parameter
      *                   exists but has an incorrect type.
      * @return mixed The sanitized request parameter.
+     * @see Request::getParameter()
+     * @deprecated Use Request class instead, which will return raw values instead.
      * @api
      */
     public static function getRequestVar($varName, $varDefault = null, $varType = null, $requestArrayToUse = null)
@@ -440,6 +499,7 @@ class Common
         }
 
         $varDefault = self::sanitizeInputValues($varDefault);
+
         if ($varType === 'int') {
             // settype accepts only integer
             // 'int' is simply a shortcut for 'integer'
@@ -468,13 +528,16 @@ class Common
         // Normal case, there is a value available in REQUEST for the requested varName:
 
         // we deal w/ json differently
-        if ($varType == 'json') {
+        if ($varType === 'json') {
             $value = $requestArrayToUse[$varName];
-            $value = json_decode($value, $assoc = true);
-            return self::sanitizeInputValues($value, $alreadyStripslashed = true);
+            if (is_string($value)) {
+                $value = json_decode($value, $assoc = true);
+            }
+            return self::sanitizeInputValues($value, true);
         }
 
         $value = self::sanitizeInputValues($requestArrayToUse[$varName]);
+
         if (isset($varType)) {
             $ok = false;
 
@@ -508,8 +571,8 @@ class Common
             if ($ok === false) {
                 if ($varDefault === null) {
                     throw new Exception("The parameter '$varName' doesn't have a correct type, and a default value wasn't provided.");
-                } // we return the default value with the good type set
-                else {
+                } else {
+                    // we return the default value with the good type set
                     settype($varDefault, $varType);
                     return $varDefault;
                 }
@@ -529,40 +592,14 @@ class Common
      *
      * @param int $min
      * @param null|int $max Defaults to max int value
-     * @return int|null
+     * @return int
      */
     public static function getRandomInt($min = 0, $max = null)
     {
-        $rand = null;
-
-        if (function_exists('random_int')) {
-            try {
-                if (!isset($max)) {
-                    $max = PHP_INT_MAX;
-                }
-                $rand = random_int($min, $max);
-            } catch (Exception $e) {
-                // If none of the crypto sources are available, an Exception will be thrown.
-                $rand = null;
-            }
+        if (!isset($max)) {
+            $max = PHP_INT_MAX;
         }
-
-        if (!isset($rand)) {
-            if (function_exists('mt_rand')) {
-                if (!isset($max)) {
-                    $max = mt_getrandmax();
-                }
-                $rand = mt_rand($min, $max);
-            } else {
-                if (!isset($max)) {
-                    $max = getrandmax();
-                }
-
-                $rand = rand($min, $max);
-            }
-        }
-
-        return $rand;
+        return random_int($min, $max);
     }
 
     /**
@@ -572,9 +609,7 @@ class Common
      */
     public static function generateUniqId()
     {
-        $rand = self::getRandomInt();
-
-        return md5(uniqid($rand, true));
+        return bin2hex(random_bytes(16));
     }
 
     /**
@@ -604,7 +639,6 @@ class Common
 
     /**
      * Generate random string.
-     * Do not use for security related purposes (the string is not truly random).
      *
      * @param int $length string length
      * @param string $alphabet characters allowed in random string
@@ -673,37 +707,9 @@ class Common
      */
     public static function convertUserIdToVisitorIdBin($userId)
     {
-        require_once PIWIK_INCLUDE_PATH . '/libs/PiwikTracker/PiwikTracker.php';
-        $userIdHashed = \PiwikTracker::getUserIdHashed($userId);
+        $userIdHashed = \MatomoTracker::getUserIdHashed($userId);
 
         return self::convertVisitorIdToBin($userIdHashed);
-    }
-
-    /**
-     * JSON encode wrapper
-     * - missing or broken in some php 5.x versions
-     *
-     * @param mixed $value
-     * @return string
-     * @deprecated
-     */
-    public static function json_encode($value)
-    {
-        return @json_encode($value);
-    }
-
-    /**
-     * JSON decode wrapper
-     * - missing or broken in some php 5.x versions
-     *
-     * @param string $json
-     * @param bool $assoc
-     * @return mixed
-     * @deprecated
-     */
-    public static function json_decode($json, $assoc = false)
-    {
-        return json_decode($json, $assoc);
     }
 
     /**
@@ -716,7 +722,7 @@ class Common
     }
 
     /**
-     * Returns a human readable error message in case an error occcurred during the last json encode/decode.
+     * Returns a human readable error message in case an error occurred during the last json encode/decode.
      * Returns an empty string in case there was no error.
      *
      * @return string
@@ -743,8 +749,12 @@ class Common
 
     public static function stringEndsWith($haystack, $needle)
     {
-        if ('' === $needle) {
+        if (strlen(strval($needle)) === 0) {
             return true;
+        }
+
+        if (strlen(strval($haystack)) === 0) {
+            return false;
         }
 
         $lastCharacters = substr($haystack, -strlen($needle));
@@ -768,79 +778,6 @@ class Common
     /*
      * DataFiles
      */
-
-    /**
-     * Returns list of continent codes
-     *
-     * @see core/DataFiles/Countries.php
-     *
-     * @return array Array of 3 letter continent codes
-     *
-     * @deprecated Use Piwik\Intl\Data\Provider\RegionDataProvider instead.
-     * @see \Piwik\Intl\Data\Provider\RegionDataProvider::getContinentList()
-     */
-    public static function getContinentsList()
-    {
-        /** @var RegionDataProvider $dataProvider */
-        $dataProvider = StaticContainer::get('Piwik\Intl\Data\Provider\RegionDataProvider');
-        return $dataProvider->getContinentList();
-    }
-
-    /**
-     * Returns list of valid country codes
-     *
-     * @see core/DataFiles/Countries.php
-     *
-     * @param bool $includeInternalCodes
-     * @return array Array of (2 letter ISO codes => 3 letter continent code)
-     *
-     * @deprecated Use Piwik\Intl\Data\Provider\RegionDataProvider instead.
-     * @see \Piwik\Intl\Data\Provider\RegionDataProvider::getCountryList()
-     */
-    public static function getCountriesList($includeInternalCodes = false)
-    {
-        /** @var RegionDataProvider $dataProvider */
-        $dataProvider = StaticContainer::get('Piwik\Intl\Data\Provider\RegionDataProvider');
-        return $dataProvider->getCountryList($includeInternalCodes);
-    }
-
-    /**
-     * Returns the list of valid language codes.
-     *
-     * See [core/DataFiles/Languages.php](https://github.com/piwik/piwik/blob/master/core/DataFiles/Languages.php).
-     *
-     * @return array Array of two letter ISO codes mapped with their associated language names (in English). E.g.
-     *               `array('en' => 'English', 'ja' => 'Japanese')`.
-     * @api
-     *
-     * @deprecated Use Piwik\Intl\Data\Provider\LanguageDataProvider instead.
-     * @see \Piwik\Intl\Data\Provider\LanguageDataProvider::getLanguageList()
-     */
-    public static function getLanguagesList()
-    {
-        /** @var LanguageDataProvider $dataProvider */
-        $dataProvider = StaticContainer::get('Piwik\Intl\Data\Provider\LanguageDataProvider');
-        return $dataProvider->getLanguageList();
-    }
-
-    /**
-     * Returns a list of language to country mappings.
-     *
-     * See [core/DataFiles/LanguageToCountry.php](https://github.com/piwik/piwik/blob/master/core/DataFiles/LanguageToCountry.php).
-     *
-     * @return array Array of two letter ISO language codes mapped with two letter ISO country codes:
-     *               `array('fr' => 'fr') // French => France`
-     * @api
-     *
-     * @deprecated Use Piwik\Intl\Data\Provider\LanguageDataProvider instead.
-     * @see \Piwik\Intl\Data\Provider\LanguageDataProvider::getLanguageToCountryList()
-     */
-    public static function getLanguageToCountryList()
-    {
-        /** @var LanguageDataProvider $dataProvider */
-        $dataProvider = StaticContainer::get('Piwik\Intl\Data\Provider\LanguageDataProvider');
-        return $dataProvider->getLanguageToCountryList();
-    }
 
     /**
      * Returns list of provider names
@@ -882,7 +819,7 @@ class Common
         );
 
         if (is_null($browserLang)) {
-            $browserLang = self::sanitizeInputValues(@$_SERVER['HTTP_ACCEPT_LANGUAGE']);
+            $browserLang = self::sanitizeInputValues($_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? '');
             if (empty($browserLang) && self::isPhpCliMode()) {
                 $browserLang = @getenv('LANG');
             }
@@ -920,7 +857,7 @@ class Common
      */
     public static function getCountry($lang, $enableLanguageToCountryGuess, $ip)
     {
-        if (empty($lang) || strlen($lang) < 2 || $lang == self::LANGUAGE_CODE_INVALID) {
+        if (empty($lang) || strlen($lang) < 2 || $lang === self::LANGUAGE_CODE_INVALID) {
             return self::LANGUAGE_CODE_INVALID;
         }
 
@@ -968,19 +905,19 @@ class Common
     }
 
     /**
-     * Returns the language and region string, based only on the Browser 'accepted language' information.
+     * Returns the language string, based only on the Browser 'accepted language' information.
      * * The language tag is defined by ISO 639-1
      *
-     * @param string $browserLanguage Browser's accepted langauge header
+     * @param string $browserLanguage Browser's accepted language header
      * @param array $validLanguages array of valid language codes
      * @return string  2 letter ISO 639 code  'es' (Spanish)
      */
     public static function extractLanguageCodeFromBrowserLanguage($browserLanguage, $validLanguages = array())
     {
-        $validLanguages = self::checkValidLanguagesIsSet($validLanguages);
         $languageRegionCode = self::extractLanguageAndRegionCodeFromBrowserLanguage($browserLanguage, $validLanguages);
+        $validLanguages = self::checkValidLanguagesIsSet($validLanguages);
 
-        if (strlen($languageRegionCode) == 2) {
+        if (strlen($languageRegionCode) === 2) {
             $languageCode = $languageRegionCode;
         } else {
             $languageCode = substr($languageRegionCode, 0, 2);
@@ -996,15 +933,16 @@ class Common
      * * The language tag is defined by ISO 639-1
      * * The region tag is defined by ISO 3166-1
      *
-     * @param string $browserLanguage Browser's accepted langauge header
-     * @param array $validLanguages array of valid language codes. Note that if the array includes "fr" then it will consider all regional variants of this language valid, such as "fr-ca" etc.
-     * @return string 2 letter ISO 639 code 'es' (Spanish) or if found, includes the region as well: 'es-ar'
+     * @param string $browserLanguage Browser's accepted language header
+     * @param array $validLanguages array of valid language/region codes.
+     * @return string 2-letter ISO 639 code 'es' (Spanish) or if found, includes the region as well: 'es-ar'
      */
     public static function extractLanguageAndRegionCodeFromBrowserLanguage($browserLanguage, $validLanguages = array())
     {
+        $forceRegionValidation = !empty($validLanguages);
         $validLanguages = self::checkValidLanguagesIsSet($validLanguages);
 
-        if (!preg_match_all('/(?:^|,)([a-z]{2,3})([-][a-z]{2})?/', $browserLanguage, $matches, PREG_SET_ORDER)) {
+        if (!preg_match_all('/(?:^|,)([a-z]{2,3})(?:[-][a-z]{4})?([-][a-z]{2})?/', $browserLanguage, $matches, PREG_SET_ORDER)) {
             return self::LANGUAGE_CODE_INVALID;
         }
         foreach ($matches as $parts) {
@@ -1014,14 +952,15 @@ class Common
             }
 
             // If a region tag is found eg. "fr-ca"
-            if (count($parts) == 3) {
+            if (count($parts) === 3) {
                 $regionIso3166 = $parts[2]; // eg. "-ca"
 
                 if (in_array($langIso639 . $regionIso3166, $validLanguages)) {
                     return $langIso639 . $regionIso3166;
                 }
 
-                if (in_array($langIso639, $validLanguages)) {
+                // if a set of valid codes was provided, we do not append the region if it was not included
+                if (in_array($langIso639, $validLanguages) && !$forceRegionValidation) {
                     return $langIso639 . $regionIso3166;
                 }
             }
@@ -1047,7 +986,7 @@ class Common
 
         $countryList = $dataProvider->getCountryList();
 
-        if ($country == 'ti') {
+        if ($country === 'ti') {
             $country = 'cn';
         }
 
@@ -1107,7 +1046,7 @@ class Common
             $fields = array($fields);
         }
         $count = count($fields);
-        if ($count == 0) {
+        if ($count === 0) {
             return "''";
         }
         return '?' . str_repeat(',?', $count - 1);
@@ -1175,6 +1114,7 @@ class Common
             401 => 'Unauthorized',
             403 => 'Forbidden',
             404 => 'Not Found',
+            429 => 'Too Many Requests',
             500 => 'Internal Server Error',
             503 => 'Service Unavailable',
         );
@@ -1208,7 +1148,7 @@ class Common
     {
         $cache = TrackerCache::getCacheGeneral();
         return empty($cache['currentLocationProviderId'])
-            ? DefaultProvider::ID
+            ? Plugins\UserCountry\LocationProvider::getDefaultProviderId()
             : $cache['currentLocationProviderId'];
     }
 
@@ -1229,34 +1169,20 @@ class Common
     }
 
     /**
-     * @todo This method is weird, it's debugging statements but seem to only work for the tracker, maybe it
-     * should be moved elsewhere
+     * @deprecated Use the logger directly instead.
      */
     public static function printDebug($info = '')
     {
-        if (isset($GLOBALS['PIWIK_TRACKER_DEBUG']) && $GLOBALS['PIWIK_TRACKER_DEBUG']) {
-            if (!headers_sent()) {
-                // prevent XSS in tracker debug output
-                Common::sendHeader('Content-type: text/plain');
-            }
+        if (is_object($info)) {
+            $info = var_export($info, true);
+        }
 
-            if (is_object($info)) {
-                $info = var_export($info, true);
-            }
-
-            $logger = StaticContainer::get('Psr\Log\LoggerInterface');
-
-            if (is_array($info) || is_object($info)) {
-                $info = Common::sanitizeInputValues($info);
-                $out = var_export($info, true);
-                foreach (explode("\n", $out) as $line) {
-                    $logger->debug($line);
-                }
-            } else {
-                foreach (explode("\n", $info) as $line) {
-                    $logger->debug($line);
-                }
-            }
+        $logger = StaticContainer::get(LoggerInterface::class);
+        if (is_array($info) || is_object($info)) {
+            $out = var_export($info, true);
+            $logger->debug($out);
+        } else {
+            $logger->debug($info);
         }
     }
 

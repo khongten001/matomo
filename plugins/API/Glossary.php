@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -13,7 +13,10 @@ use Piwik\Metrics;
 
 class Glossary
 {
-    protected $metadata = array();
+    /**
+     * @var API
+     */
+    private $api;
 
     public function __construct(API $api)
     {
@@ -27,10 +30,16 @@ class Glossary
         $reports = array();
         foreach ($metadata as $report) {
             if (isset($report['documentation'])) {
-                $reports[] = array(
+                $docReport = array(
                     'name' => sprintf("%s (%s)", $report['name'], $report['category']),
                     'documentation' => $report['documentation']
                 );
+
+                if (isset($report['onlineGuideUrl'])) {
+                    $docReport['onlineGuideUrl'] = $report['onlineGuideUrl'];
+                }
+
+                $reports[] = $docReport;
             }
         }
 
@@ -79,8 +88,7 @@ class Glossary
                         throw new \Exception(sprintf("Metric %s has two different documentations: \n(1) %s \n(2) %s",
                                 $metricKey,
                                 $metrics[$metricKey]['documentation'],
-                                $metricDocumentation)
-                        );
+                                $metricDocumentation));
                     }
                 } else {
 
@@ -91,7 +99,6 @@ class Glossary
                         // it will be set in another one
                         continue;
                     }
-
                 }
 
                 $metrics[$metricKey] = array(
@@ -113,9 +120,11 @@ class Glossary
                 );
             }
         }
-        
+
         usort($metrics, function ($a, $b) {
-            return strcmp($a['name'], $b['name']);
+            $key = ($a['name'] === $b['name'] ? 'id' : 'name');
+
+            return strcmp($a[$key], $b[$key]);
         });
         return $metrics;
     }

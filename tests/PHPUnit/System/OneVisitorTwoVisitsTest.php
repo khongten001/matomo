@@ -1,14 +1,15 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Tests\System;
 
 use Piwik\API\Proxy;
 use Piwik\Archive;
+use Piwik\Tests\Framework\Fixture;
 use Piwik\Tests\Framework\TestCase\SystemTestCase;
 use Piwik\Tests\Fixtures\OneVisitorTwoVisits;
 use Exception;
@@ -33,12 +34,12 @@ class OneVisitorTwoVisitsTest extends SystemTestCase
      */
     public static $fixture = null; // initialized below class
 
-    public function setUp()
+    public function setUp(): void
     {
         Proxy::getInstance()->setHideIgnoredFunctions(false);
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         Proxy::getInstance()->setHideIgnoredFunctions(true);
     }
@@ -73,17 +74,36 @@ class OneVisitorTwoVisitsTest extends SystemTestCase
             // Testing with several days
             "idSite=" . $idSite . "&date=2010-03-06,2010-03-07&expanded=1&period=day&method=VisitsSummary.get",
             "idSite=" . $idSite . ",$idSiteBis,$idSiteTer&date=2010-03-06,2010-03-07&expanded=1&period=day&method=VisitsSummary.get",
-            "idSite=" . $idSite . "&date=2010-03-06&expanded=1&period=day&method=VisitorInterest.getNumberOfVisitsPerVisitDuration"
+            "idSite=" . $idSite . "&date=2010-03-06&expanded=1&period=day&method=VisitorInterest.getNumberOfVisitsPerVisitDuration",
+            "idSite=" . $idSite . "&date=2010-03-06&expanded=1&period=day&method=UsersManager.getUserPreference&preferenceName=defaultReportDate&userLogin=" . Fixture::ADMIN_USER_LOGIN
         );
         foreach ($bulkUrls as &$url) {
             $url = urlencode($url);
         }
+
         return array(
             array('all', array('idSite' => $idSite,
                                'date' => $dateTime,
                                'otherRequestParameters' => array(
                                    'hideColumns' => OneVisitorTwoVisits::getValueForHideColumns(),
                                )
+            )),
+
+            array('all', array('idSite' => $idSite,
+                'date' => $dateTime,
+                'format' => 'original',
+                'otherRequestParameters' => array(
+                    'serialize' => '1',
+                ),
+                'onlyCheckUnserialize' => true,
+            )),
+            array('Live.getMostRecentVisitorId', array('idSite' => $idSite,
+                'date' => $dateTime,
+                'format' => 'original',
+                'otherRequestParameters' => array(
+                    'serialize' => '1',
+                ),
+                'onlyCheckUnserialize' => true,
             )),
 
             // test API.get (for bug that incorrectly reorders columns of CSV output)
@@ -141,7 +161,7 @@ class OneVisitorTwoVisitsTest extends SystemTestCase
                                                   'otherRequestParameters' => array(
                                                       'hideColumns' => 'nb_visits_converted,xyzaug,entry_nb_visits,' .
                                                           'bounce_rate,nb_hits,nb_visits,avg_time_on_page,' .
-														  'avg_time_generation,nb_hits_with_time_generation'
+                                                          'avg_time_generation,nb_hits_with_time_generation'
                                                   ))),
 
             array('API.getProcessedReport', array('idSite'                 => $idSite, 'date' => $dateTime,
@@ -204,13 +224,23 @@ class OneVisitorTwoVisitsTest extends SystemTestCase
             Archive::build(
                 'all', 'day', self::$fixture->dateTime, $segment = false, $_restrictToLogin = 'anotherLogin');
             $this->fail("Restricting sites to invalid login did not return 0 sites.");
-        }
-        catch (Exception $ex)
+        } catch (Exception $ex)
         {
             // pass
         }
     }
+
+    public function provideContainerConfig()
+    {
+        return array(
+            'Piwik\Config' => \Piwik\DI::decorate(function ($previous) {
+                $general = $previous->General;
+                $general['action_title_category_delimiter'] = "/";
+                $previous->General = $general;
+                return $previous;
+            }),
+        );
+    }
 }
 
 OneVisitorTwoVisitsTest::$fixture = new OneVisitorTwoVisits();
-OneVisitorTwoVisitsTest::$fixture->excludeMozilla = true;

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,10 +11,10 @@ namespace Piwik\Tracker;
 
 use Exception;
 use Piwik\Common;
-use Piwik\Piwik;
+use Piwik\Container\StaticContainer;
 use Piwik\Plugin\Dimension\ActionDimension;
 use Piwik\Plugin\Manager;
-use Piwik\Tracker;
+use Piwik\Log\LoggerInterface;
 
 /**
  * An action
@@ -46,8 +46,8 @@ abstract class Action
 
     private static $factoryPriority = array(
         self::TYPE_PAGE_URL,
-        self::TYPE_CONTENT,
         self::TYPE_SITE_SEARCH,
+        self::TYPE_CONTENT,
         self::TYPE_EVENT,
         self::TYPE_OUTLINK,
         self::TYPE_DOWNLOAD
@@ -75,6 +75,11 @@ abstract class Action
      *  Raw URL (will contain excluded URL query parameters)
      */
     private $rawActionUrl;
+
+    /**
+     * @var mixed|LoggerInterface
+     */
+    private $logger;
 
     /**
      * Makes the correct Action object based on the request.
@@ -105,7 +110,26 @@ abstract class Action
             return $action;
         }
 
+        if (self::isCustomActionRequest($request)) {
+            throw new Exception('Request was meant for a plugin which is no longer activated. Request needs to be ignored.');
+        }
+
         return new ActionPageview($request);
+    }
+
+    /**
+     * Returns true if the tracking request was meant for some action that isn't the page view. See
+     * https://github.com/matomo-org/matomo/pull/16570 for more details. Basically, plugins that implement a tracker
+     * action should send a `ca=1` tracking parameter along the request so it doesn't get executed should the plugin
+     * be disabled but the JS tracker is still cached and keeps on sending these requests.
+     *
+     * @param Request $request
+     * @return bool
+     * @throws Exception
+     */
+    public static function isCustomActionRequest(Request $request)
+    {
+        return $request->hasParam('ca') && $request->getParam('ca');
     }
 
     private static function getPriority(Action $actionType)
@@ -148,6 +172,7 @@ abstract class Action
     {
         $this->actionType = $type;
         $this->request    = $request;
+        $this->logger = StaticContainer::get(LoggerInterface::class);
     }
 
     /**
@@ -178,11 +203,6 @@ abstract class Action
         return $this->actionType;
     }
 
-    public function getCustomVariables()
-    {
-        return $this->request->getCustomVariables($scope = 'page');
-    }
-
     // custom_float column
     public function getCustomFloatValue()
     {
@@ -202,8 +222,12 @@ abstract class Action
         $this->actionUrl = PageUrl::getUrlIfLookValid($url2);
 
         if ($url != $this->rawActionUrl) {
-            Common::printDebug(' Before was "' . $this->rawActionUrl . '"');
-            Common::printDebug(' After is "' . $url2 . '"');
+            $this->logger->debug(' Before was "{rawActionUrl}"', [
+                'rawActionUrl' => $this->rawActionUrl,
+            ]);
+            $this->logger->debug(' After is "{url2}"', [
+                'url2' => $url2,
+            ]);
         }
     }
 
@@ -332,7 +356,7 @@ abstract class Action
 
                 $actionId        = $dimension->getActionId();
                 $actions[$field] = array($value, $actionId);
-                Common::printDebug("$field = $value");
+                $this->logger->debug("$field = $value");
             }
         }
 
@@ -357,6 +381,8 @@ abstract class Action
      */
     public function record(Visitor $visitor, $idReferrerActionUrl, $idReferrerActionName)
     {
+
+
         $this->loadIdsFromLogActionTable();
 
         $visitAction = array(
@@ -393,7 +419,7 @@ abstract class Action
         }
 
         $customValue = $this->getCustomFloatValue();
-        if (!empty($customValue)) {
+        if ($customValue !== false && $customValue !== null && $customValue !== '') {
             $visitAction[self::DB_COLUMN_CUSTOM_FLOAT] = Common::forceDotAsSeparatorForDecimalPoint($customValue);
         }
 
@@ -403,10 +429,11 @@ abstract class Action
 
         $visitAction['idlink_va'] = $this->idLinkVisitAction;
 
-        Common::printDebug("Inserted new action:");
         $visitActionDebug = $visitAction;
         $visitActionDebug['idvisitor'] = bin2hex($visitActionDebug['idvisitor']);
-        Common::printDebug($visitActionDebug);
+        $this->logger->debug("Inserted new action: {action}", [
+            'action' => var_export($visitActionDebug, true),
+        ]);
     }
 
     public function writeDebugInfo()
@@ -415,9 +442,11 @@ abstract class Action
         $name = $this->getActionName();
         $url  = $this->getActionUrl();
 
-        Common::printDebug("Action is a $type,
-                Action name =  " . $name . ",
-                Action URL = " . $url);
+        $this->logger->debug('Action is a {type}, Action name = {name}, Action URL = {url}', [
+            'type' => $type,
+            'name' => $name,
+            'url' => $url,
+        ]);
 
         return true;
     }

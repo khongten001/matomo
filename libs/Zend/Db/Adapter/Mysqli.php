@@ -313,11 +313,15 @@ class Zend_Db_Adapter_Mysqli extends Zend_Db_Adapter_Abstract
                 if(array_key_exists($option, $ssl_options)) {
                     $ssl_options[$option] = $value;
                     $enable_ssl = true;
+                    continue; // these options are set below in mysqli_ssl_set
                 } elseif(is_string($option)) {
                     // Suppress warnings here
                     // Ignore it if it's not a valid constant
+                    if(!defined(strtoupper($option))) {
+                        continue;
+                    }
                     $option = @constant(strtoupper($option));
-                    if($option === null)
+                    if ($option === null)
                         continue;
                 }
                 mysqli_options($this->_connection, $option, $value);
@@ -346,6 +350,8 @@ class Zend_Db_Adapter_Mysqli extends Zend_Db_Adapter_Abstract
             }
         }
 
+        $socket = !empty($this->_config['unix_socket']) ? $this->_config['unix_socket'] : null;
+
         // Suppress connection warnings here.
         // Throw an exception instead.
         $_isConnected = @mysqli_real_connect(
@@ -355,7 +361,7 @@ class Zend_Db_Adapter_Mysqli extends Zend_Db_Adapter_Abstract
             $this->_config['password'],
             $this->_config['dbname'],
             $port,
-            $socket = null,
+            $socket,
             $enable_ssl ? $flags : null
         );
 

@@ -1,7 +1,7 @@
 /*!
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -80,6 +80,20 @@ Segmentation = (function($) {
             $(this.content).attr('title', title);
         };
 
+        segmentation.prototype.markComparedSegments = function() {
+            var comparisonService = window.CoreHome.ComparisonsStoreInstance;
+            var comparedSegments = comparisonService.getSegmentComparisons().map(function (comparison) {
+                return comparison.params.segment;
+            });
+
+            $('div.segmentList ul li[data-definition]', this.target).removeClass('comparedSegment').filter(function () {
+                var definition = $(this).attr('data-definition');
+                return comparedSegments.indexOf(definition) !== -1 || comparedSegments.indexOf(decodeURIComponent(definition)) !== -1;
+            }).each(function () {
+                $(this).addClass('comparedSegment');
+            });
+        };
+
         segmentation.prototype.markCurrentSegment = function(){
             var current = this.getSegment();
 
@@ -88,7 +102,7 @@ Segmentation = (function($) {
             if( current != "")
             {
                 // this code is mad, and may drive you mad.
-                // the whole segmentation editor needs to be rewritten in AngularJS with clean code
+                // the whole segmentation editor needs to be rewritten in Vue with clean code
                 var selector = 'div.segmentList ul li[data-definition="'+current+'"]';
                 var foundItems = $(selector, this.target);
 
@@ -123,6 +137,13 @@ Segmentation = (function($) {
             }
         };
 
+        function handleAddNewSegment() {
+            var segmentToAdd = broadcast.getValueFromHash('addSegmentAsNew') || broadcast.getValueFromUrl('addSegmentAsNew');
+            if (segmentToAdd) {
+                showAddNewSegmentForm({ definition: decodeURIComponent(segmentToAdd) });
+            }
+        }
+
         var getSegmentFromId = function (id) {
             if(self.availableSegments.length > 0) {
                 for(var i = 0; i < self.availableSegments.length; i++)
@@ -140,10 +161,17 @@ Segmentation = (function($) {
             var html = self.editorTemplate.find("> .listHtml").clone();
             var segment, injClass;
             var listHtml = '<li data-idsegment="" ' +
-                (self.currentSegmentStr == "" ? " class='segmentSelected' tabindex='4' " : "")
-                + ' data-definition=""><span class="segname">' + self.translations['SegmentEditor_DefaultAllVisits']
+                (self.currentSegmentStr == "" ? " class='segmentSelected'" : "")
+                + ' data-definition=""><span class="segname" tabindex="4">' + self.translations['SegmentEditor_DefaultAllVisits']
                 + ' ' + self.translations['General_DefaultAppended']
-                + '</span></li> ';
+                + '</span>';
+            var comparisonService = window.CoreHome.ComparisonsStoreInstance;
+            if (comparisonService.isComparisonEnabled()
+                || comparisonService.isComparisonEnabled() === null // may not be initialized since this code is outside of Vue
+            ) {
+                listHtml += '<span class="compareSegment allVisitsCompareSegment" title="' + _pk_translate('SegmentEditor_CompareThisSegment') + '"></span>';
+            }
+            listHtml += '</li>';
 
             var isVisibleToSuperUserNoticeAlreadyDisplayedOnce = false;
             var isVisibleToSuperUserNoticeShouldBeClosed = false;
@@ -188,6 +216,11 @@ Segmentation = (function($) {
                         +injClass+' title="'+ getSegmentTooltipEnrichedWithUsername(segment) +'"><span class="segname" tabindex="4">'+getSegmentName(segment)+'</span>';
                     if(self.segmentAccess == "write") {
                         listHtml += '<span class="editSegment" title="'+ self.translations['General_Edit'].toLocaleLowerCase() +'"></span>';
+                    }
+                    if (comparisonService.isComparisonEnabled()
+                        || comparisonService.isComparisonEnabled() === null // may not be initialized since this code is outside of Vue
+                    ) {
+                        listHtml += '<span class="compareSegment" title="' + _pk_translate('SegmentEditor_CompareThisSegment') + '"></span>';
                     }
                     listHtml += '</li>';
                 }
@@ -255,21 +288,9 @@ Segmentation = (function($) {
 
         var getFormHtml = function() {
             var html = self.editorTemplate.find("> .segment-element").clone();
-            // set left margin to center form
-            var segmentsDropdown = $(html).find(".available_segments_select");
-            var segment, newOption;
-            newOption = '<option data-idsegment="" data-definition="" title="'
-                + self.translations['SegmentEditor_AddNewSegment']
-                + '">' + self.translations['SegmentEditor_AddNewSegment']
-                + '</option>';
-            segmentsDropdown.append(newOption);
-            for(var i = 0; i < self.availableSegments.length; i++)
-            {
-                segment = self.availableSegments[i];
-                newOption = '<option data-idsegment="'+segment.idsegment+'" data-definition="'+(segment.definition).replace(/"/g, '&quot;')+'" title="'+getSegmentTooltipEnrichedWithUsername(segment)+'">'+getSegmentName(segment)+'</option>';
-                segmentsDropdown.append(newOption);
-            }
-            $(html).find(".segment-content > h3").after('<div piwik-segment-generator add-initial-condition="true"></div>').show();
+            $(html).find(".segment-content > h3")
+              .after('<div class="segment-generator-container"></div>')
+              .show();
             return html;
         };
 
@@ -287,7 +308,7 @@ Segmentation = (function($) {
                 .html( getSegmentName(segment) )
                 .prop('title', getSegmentTooltipEnrichedWithUsername(segment));
 
-            $(self.form).find('.available_segments_select > option[data-idsegment="'+segment.idsegment+'"]').prop("selected",true);
+            $(self.form).find('.available_segments_select').val(segment.idsegment);
 
             $(self.form).find('.available_segments a.dropList')
                 .html( getSegmentName(segment) )
@@ -298,10 +319,20 @@ Segmentation = (function($) {
             });
         };
 
-        var displayFormAddNewSegment = function (e) {
+        var displayFormAddNewSegment = function (segment) {
             closeAllOpenLists();
-            addForm("new");
+            addForm("new", segment);
         };
+
+        function showAddNewSegmentForm(segment) {
+            var parameters = {isAllowed: true};
+            window.CoreHome.Matomo.postEvent('Segmentation.initAddSegment', parameters);
+            if (parameters && !parameters.isAllowed) {
+                return;
+            }
+
+            displayFormAddNewSegment(segment);
+        }
 
         var filterSegmentList = function (keyword) {
             var curTitle;
@@ -327,7 +358,7 @@ Segmentation = (function($) {
             if ($(self.target).find(".segmentList .segmentsSharedWithMeBySuperUser li:visible").length == 0) {
                 $(self.target).find(".segmentList .segmentsSharedWithMeBySuperUser").hide();
             }
-        }
+        };
 
         var clearFilterSegmentList = function () {
             $(self.target).find(" .filterNoResults").remove();
@@ -336,7 +367,7 @@ Segmentation = (function($) {
             });
             $(self.target).find(".segmentList .segmentsVisibleToSuperUser").show();
             $(self.target).find(".segmentList .segmentsSharedWithMeBySuperUser").show();
-        }
+        };
 
         var bindEvents = function () {
             self.target.on('click', '.segmentationContainer', function (e) {
@@ -348,9 +379,6 @@ Segmentation = (function($) {
                         || $(e.target).hasClass("filterNoResults")) {
                         e.stopPropagation();
                     } else {
-                        if (self.jscroll) {
-                            self.jscroll.destroy();
-                        }
                         self.target.closest('.segmentEditorPanel').removeClass('expanded');
                     }
                 } else {
@@ -358,10 +386,6 @@ Segmentation = (function($) {
                     closeAllOpenLists();
                     self.target.closest('.segmentEditorPanel').addClass('expanded');
                     self.target.find('.segmentFilter').val(self.translations['General_Search']).trigger('keyup');
-                    self.jscroll = self.target.find(".segmentList").jScrollPane({
-                        autoReinitialise: true,
-                        showArrows:true
-                    }).data().jsp;
                 }
             });
 
@@ -374,33 +398,47 @@ Segmentation = (function($) {
                 e.preventDefault();
             });
 
+            self.target.on('click', '.compareSegment', function (e) {
+                e.stopPropagation();
+                e.preventDefault();
+
+                var comparisonService = window.CoreHome.ComparisonsStoreInstance;
+                comparisonService.addSegmentComparison({
+                    segment: $(e.target).closest('li').data('definition'),
+                });
+
+                self.markComparedSegments();
+
+                closeAllOpenLists();
+            });
+
             self.target.on("click", ".segmentList li", function (e) {
                 if ($(e.currentTarget).hasClass("grayed") !== true) {
-                    var idsegment = $(this).attr("data-idsegment");
-                    segmentDefinition = $(this).data("definition");
+                    var segmentDefinition = $(this).data("definition");
 
-                    if (!piwikHelper.isAngularRenderingThePage()) {
+                    if (!piwikHelper.isReportingPage()) {
                         // we update segment on location change success
                         self.setSegment(segmentDefinition);
                     }
 
                     self.markCurrentSegment();
-                    self.segmentSelectMethod( segmentDefinition );
+                    self.segmentSelectMethod(segmentDefinition);
                     toggleLoadingMessage(segmentDefinition.length);
                 }
             });
 
             self.target.on('click', '.add_new_segment', function (e) {
-
-                var parameters = {isAllowed: true};
-                var $rootScope = piwikHelper.getAngularDependency('$rootScope');
-                $rootScope.$emit('Segmentation.initAddSegment', parameters);
-                if (parameters && !parameters.isAllowed) {
-                    return;
-                }
-
                 e.stopPropagation();
-                displayFormAddNewSegment(e);
+
+                showAddNewSegmentForm();
+            });
+
+            // emulate a click when pressing enter on one of the segments or the add button
+            self.target.on("keyup", ".segmentList li, .add_new_segment", function (event) {
+                var keycode = (event.keyCode ? event.keyCode : (event.which ? event.which : event.key));
+                if(keycode == '13'){
+                    $(this).trigger('click');
+                }
             });
 
             // attach event that will clear segment list filtering input after clicking x
@@ -473,14 +511,10 @@ Segmentation = (function($) {
                 e.preventDefault();
             });
 
-            self.target.on('change', '.available_segments_select', function (e) {
-                var option = $(e.currentTarget).find('option:selected');
-                openEditFormGivenSegment(option);
-            });
 
             self.target.on('click', ".delete", function() {
                 var segmentName = $(self.form).find(".segment-content > h3 > span").text();
-                var segmentId = $(self.form).find(".available_segments_select option:selected").attr("data-idsegment");
+                var segmentId = $(self.form).find(".available_segments_select").val();
                 var params = {
                     "idsegment" : segmentId
                 };
@@ -502,6 +536,10 @@ Segmentation = (function($) {
             $("body").on("keyup", function (e) {
                 if(e.keyCode == "27" || e.which === 27) {
                     if (self.target.find('[uicontrol="expandable-select"] .expandableList:visible').length) {
+                        return;
+                    }
+                    if (Piwik_Popover.isOpen()) {
+                        Piwik_Popover.close();
                         return;
                     }
                     $(".segmentListContainer", self.target).show();
@@ -574,7 +612,7 @@ Segmentation = (function($) {
             }
 
             if(mode == "edit") {
-                var userSelector = $(self.form).find('.enable_all_users_select > option[value="' + segment.enable_all_users + '"]').prop("selected",true);
+                $(self.form).find('.enable_all_users_select > option[value="' + segment.enable_all_users + '"]').prop("selected",true);
 
                 // Replace "Visible to me" by "Visible to $login" when user is super user
                 if(hasSuperUserAccessAndSegmentCreatedByAnotherUser(segment)) {
@@ -582,19 +620,23 @@ Segmentation = (function($) {
                 }
                 $(self.form).find('.visible_to_website_select > option[value="'+segment.enable_only_idsite+'"]').prop("selected",true);
                 $(self.form).find('.auto_archive_select > option[value="'+segment.auto_archive+'"]').prop("selected",true);
+            }
 
-                if (segment.definition != ""){
-                    self.form.find('[piwik-segment-generator]').attr('segment-definition', segment.definition);
-                }
+            if (segment !== undefined && segment.definition != ""){
+                self.currentSegmentStr = segment.definition;
+                self.form.find('.segment-generator-container').attr('model-value', JSON.stringify(segment.definition));
             }
 
             makeDropList(".enable_all_users" , ".enable_all_users_select");
             makeDropList(".visible_to_website" , ".visible_to_website_select");
             makeDropList(".auto_archive" , ".auto_archive_select");
-            makeDropList(".available_segments" , ".available_segments_select");
             $(self.form).find(".saveAndApply").bind("click", function (e) {
                 e.preventDefault();
                 parseFormAndSave();
+            });
+            $(self.form).find(".testSegment").bind("click", function (e) {
+                e.preventDefault();
+                testSegment();
             });
 
             if(typeof mode !== "undefined" && mode == "new")
@@ -605,25 +647,56 @@ Segmentation = (function($) {
 
             self.target.closest('.segmentEditorPanel').addClass('editing');
 
-            piwikHelper.compileAngularComponents(self.target);
+            var segmentGeneratorContainer = $('.segment-generator-container', self.form)[0];
+
+            var createVueApp = window.CoreHome.createVueApp;
+            var SegmentGenerator = window.SegmentEditor.SegmentGenerator;
+
+            var app = createVueApp({
+              template: '<root :add-initial-condition="true" v-model="value" />',
+              components: {
+                root: SegmentGenerator,
+              },
+              watch: {
+                value: function () {
+                  self.currentSegmentStr = this.value;
+                },
+              },
+              data() {
+                return {
+                  value: self.currentSegmentStr,
+                };
+              },
+            });
+            app.mount(segmentGeneratorContainer);
+
+            this.addEventListener('matomoVueDestroy', function () {
+              app.unmount();
+            });
         };
 
         var closeForm = function () {
+            $(self.form).find('.segment-generator-container')[0].dispatchEvent(
+              new CustomEvent('matomoVueDestroy'),
+            );
+
+            self.currentSegmentStr = '';
+
             $(self.form).unbind().remove();
             self.target.closest('.segmentEditorPanel').removeClass('editing');
         };
 
-        function getSegmentGeneratorController()
-        {
-            return angular.element(self.form.find('.segment-generator')).scope().segmentGenerator;
-        }
-
         var parseFormAndSave = function(){
             var segmentName = $(self.form).find(".segment-content > h3 >span").text();
-            var segmentStr = getSegmentGeneratorController().getSegmentString();
-            var segmentId = $(self.form).find('.available_segments_select > option:selected').attr("data-idsegment");
+            var segmentStr = self.currentSegmentStr;
+            var segmentId = $(self.form).find(".available_segments_select").val() || "";
             var user = $(self.form).find(".enable_all_users_select option:selected").val();
-            var autoArchive = $(self.form).find(".auto_archive_select option:selected").val() || 0;
+            // if create realtime segments is disabled, the select field is not available, but we need to use autoArchive = 1
+            if ($(self.form).find(".auto_archive_select").length) {
+              var autoArchive = $(self.form).find(".auto_archive_select option:selected").val() || 0;
+            } else {
+              var autoArchive = 1;
+            }
             var params = {
                 "name": segmentName,
                 "definition": segmentStr,
@@ -683,10 +756,28 @@ Segmentation = (function($) {
             }
         };
 
+        var testSegment = function() {
+            var segmentStr = self.currentSegmentStr;
+            var encSegment = jQuery(jQuery('.segmentEditorPanel').get(0)).data('uiControlObject').uriEncodeSegmentDefinition(segmentStr);
+
+            var url = $.param({
+                date: piwik.currentDateString,
+                period: piwik.period,
+                idSite: piwik.idSite,
+                module: 'Live',
+                action: 'getLastVisitsDetails',
+                segment: encSegment,
+                inPopover: 1,
+            });
+
+            Piwik_Popover.createPopupAndLoadUrl(url, _pk_translate('Live_VisitsLog'));
+        };
+
         var makeDropList = function(spanId, selectId){
-            var select = $(self.form).find(selectId).hide();
+            var select = $(self.form).find(selectId);
+            select.hide().closest('.select-wrapper').children().hide();
             var dropList = $( '<a class="dropList dropdown">' )
-                .insertAfter( select )
+                .insertAfter( select.closest('.hide-select') )
                 .text( select.children(':selected').text() )
                 .autocomplete({
                     delay: 0,
@@ -745,6 +836,8 @@ Segmentation = (function($) {
         }
 
         this.initHtml = function() {
+            var self = this;
+
             var html = getListHtml();
 
             if(typeof self.content !== "undefined"){
@@ -754,34 +847,42 @@ Segmentation = (function($) {
                 this.content = this.target.find(".segmentationContainer");
             }
 
-            // assign content to object attribute to make it easil accesible through all widget methods
+            // assign content to object attribute to make it easily accessible through all widget methods
             this.markCurrentSegment();
+            setTimeout(function () {
+                self.markComparedSegments();
+            });
 
             // Loading message
             var segmentIsSet = this.getSegment().length;
             toggleLoadingMessage(segmentIsSet);
         };
 
-        if (piwikHelper.isAngularRenderingThePage()) {
-            angular.element(document).injector().invoke(function ($rootScope, $location) {
-                $rootScope.$on('$locationChangeSuccess', function () {
-                    var $search = $location.search();
+        if (piwikHelper.isReportingPage()) {
+          var watch = window.Vue.watch;
+          var MatomoUrl = window.CoreHome.MatomoUrl;
+          watch(
+            function () {
+              return MatomoUrl.url.value;
+            },
+            function () {
+              var segment = MatomoUrl.hashParsed.value.segment || '';
 
-                    var segment = '';
-                    if ('undefined' !== typeof $search.segment && null !== $search.segment) {
-                        segment = $search.segment
-                    }
-
-                    if (self.getSegment() != segment) {
-                        self.setSegment(segment);
-                        self.initHtml();
-                    }
+              if (self.getSegment() != segment) {
+                self.setSegment(segment);
+                self.initHtml();
+              } else {
+                setTimeout(function () {
+                  self.markComparedSegments();
                 });
-            });
+              }
+            }
+          );
         }
 
         this.initHtml();
         bindEvents();
+        handleAddNewSegment();
     };
 
     return segmentation;
@@ -818,22 +919,16 @@ $(document).ready(function() {
         };
 
         this.changeSegment = function(segmentDefinition) {
-            if (piwikHelper.isAngularRenderingThePage()) {
-                angular.element(document).injector().invoke(function ($location, $rootScope) {
-                    var $search = $location.search();
-
-                    if (segmentDefinition !== $search.segment) {
-                        // eg when using back button the date might be actually already changed in the URL and we do not
-                        // want to change the URL again
-                        $search.segment = segmentDefinition.replace(/%$/, '%25').replace(/%([^\d].)/g, "%25$1");
-                        $location.search($search);
-                        setTimeout(function () {
-                            try {
-                                $rootScope.$apply();
-                            } catch (e) {}
-                        }, 1);
-                    }
-                });
+            if (piwikHelper.isReportingPage()) {
+                var MatomoUrl = window.CoreHome.MatomoUrl;
+                var segment = MatomoUrl.hashParsed.value.segment;
+                if (segmentDefinition !== segment) {
+                  // eg when using back button the date might be actually already changed in the URL and we do not
+                  // want to change the URL again
+                  MatomoUrl.updateHash(Object.assign({}, MatomoUrl.hashParsed.value, {
+                    segment: segmentDefinition.replace(/%$/, '%25').replace(/%([^\d].)/g, "%25$1"),
+                  }));
+                }
                 return false;
             } else {
                 return this.forceSegmentReload(segmentDefinition);
@@ -842,20 +937,20 @@ $(document).ready(function() {
 
         this.forceSegmentReload = function (segmentDefinition) {
             segmentDefinition = this.uriEncodeSegmentDefinition(segmentDefinition);
-            
-            if (piwikHelper.isAngularRenderingThePage()) {
-                return broadcast.propagateNewPage('', true, 'segment=' + segmentDefinition);
+
+            if (piwikHelper.isReportingPage()) {
+                return broadcast.propagateNewPage('', true, 'addSegmentAsNew=&segment=' + segmentDefinition, ['compareSegments', 'comparePeriods', 'compareDates']);
             } else {
                 // eg in case of exported dashboard
-                return broadcast.propagateNewPage('segment=' + segmentDefinition, true, 'segment=' + segmentDefinition);
+                return broadcast.propagateNewPage('segment=' + segmentDefinition, true, 'addSegmentAsNew=&segment=' + segmentDefinition, ['compareSegments', 'comparePeriods', 'compareDates']);
             }
         };
 
         this.changeSegmentList = function () {};
 
         var cleanupSegmentDefinition = function(definition) {
-            definition = definition.replace("'", "%27");
-            definition = definition.replace("&", "%26");
+            definition = definition.replace(/'/g, "%27");
+            definition = definition.replace(/&/g, "%26");
             return definition;
         };
 
@@ -1006,12 +1101,18 @@ $(document).ready(function() {
 
         this.onMouseUp = function(e) {
             if ($(e.target).closest('.segment-element').length === 0
+                && !$(e.target).is('.ui-menu-item-wrapper')
                 && !$(e.target).is('.segment-element')
                 && $(e.target).hasClass("ui-corner-all") == false
-                && $(e.target).hasClass("ddmetric") == false
+                && $(e.target).hasClass("ui-icon-closethick") == false
+                && $(e.target).hasClass("ui-button-text") == false
                 && $(".segment-element:visible", self.$element).length == 1
             ) {
-                $(".segment-element:visible a.close", self.$element).click();
+                if (Piwik_Popover.isOpen()) {
+                    Piwik_Popover.close();
+                } else {
+                    $(".segment-element:visible a.close", self.$element).click();
+                }
             }
 
             if ($(e.target).closest('.segmentListContainer').length === 0
@@ -1024,6 +1125,8 @@ $(document).ready(function() {
         $('body').on('mouseup', this.onMouseUp);
 
         initTopControls();
+
+        window.CoreHome.Matomo.postEvent('piwikSegmentationInited');
     };
 
     /**

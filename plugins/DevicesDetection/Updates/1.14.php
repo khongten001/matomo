@@ -1,15 +1,14 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 
 namespace Piwik\Plugins\DevicesDetection;
 
-use Piwik\Common;
 use Piwik\Updater;
 use Piwik\Updates;
 use Piwik\Updater\Migration\Factory as MigrationFactory;
@@ -45,5 +44,4 @@ class Updates_1_14 extends Updates
     {
         $updater->executeMigrations(__FILE__, $this->getMigrations($updater));
     }
-
 }

@@ -1,12 +1,12 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
-namespace Piwik\Plugins\PrivacyManager\tests;
+namespace Piwik\Plugins\PrivacyManager\tests\Unit;
 
 
 use Piwik\Plugins\PrivacyManager\Config;
@@ -16,16 +16,16 @@ use Piwik\Plugins\PrivacyManager\DoNotTrackHeaderChecker;
  * Class DoNotTrackHeaderCheckerTest
  * @group DoNotTrackHeaderCheckerTest
  */
-class DoNotTrackHeaderCheckerTest extends \PHPUnit_Framework_TestCase
+class DoNotTrackHeaderCheckerTest extends \PHPUnit\Framework\TestCase
 {
-    public function setUp()
+    public function setUp(): void
     {
         $this->cleanupServerGlobals();
 
         $this->setUserAgentToChrome();
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         $this->cleanupServerGlobals();
     }
@@ -34,8 +34,8 @@ class DoNotTrackHeaderCheckerTest extends \PHPUnit_Framework_TestCase
     {
         $dntChecker = $this->makeDntHeaderChecker();
 
-        $this->assertFalse( $dntChecker->isActive() );
-        $this->assertFalse( $dntChecker->isDoNotTrackFound() );
+        $this->assertFalse($dntChecker->isActive());
+        $this->assertFalse($dntChecker->isDoNotTrackFound());
     }
 
     public function getHeader_DntIsActivated()
@@ -66,7 +66,7 @@ class DoNotTrackHeaderCheckerTest extends \PHPUnit_Framework_TestCase
         $dntChecker = $this->makeDntHeaderCheckerEnabled();
 
         $_SERVER[$headerName] = $headerValue;
-        $this->assertTrue( $dntChecker->isDoNotTrackFound() );
+        $this->assertTrue($dntChecker->isDoNotTrackFound());
     }
 
     /**
@@ -77,37 +77,6 @@ class DoNotTrackHeaderCheckerTest extends \PHPUnit_Framework_TestCase
         $dntChecker = $this->makeDntHeaderCheckerEnabled();
 
         $_SERVER[$headerName] = $headerValue;
-        $this->assertFalse( $dntChecker->isDoNotTrackFound() );
-    }
-
-    public function getUserAgents_whereDNTIsAlwaysEnabled()
-    {
-        return array(
-            // IE
-            array('Mozilla/4.0 (compatible; MSIE 4.01; Mac_PowerPC)'),
-            array('Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 6.1; Trident/4.0; SLCC2; .NET CLR 2.0.50727; .NET CLR 3.5.30729; .NET CLR 3.0.30729; Media Center PC 6.0; OfficeLiveConnector.1.4; OfficeLivePatch.1.3)'),
-            array('Mozilla/5.0 (IE 11.0; Windows NT 6.3; Trident/7.0; .NET4.0E; .NET4.0C; rv:11.0) like Gecko'),
-
-            // Maxthon
-            array('Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 5.1; Trident/4.0; .NET CLR 2.0.50727; MAXTHON 2.0)'),
-            array('Mozilla/4.0 (compatible; MSIE 8.0; Windows NT 5.1; Trident/4.0; Maxthon/4.2.0.4000)'),
-            array('Mozilla/5.0 (Windows NT 5.1) AppleWebKit/537.36 (KHTML, like Gecko) Maxthon/4.4.3.1000 Chrome/30.0.1599.101 Safari/537.36'),
-
-            // With capital letters
-            array('Mozilla/5.0 (Windows NT 5.1) AppleWebKit/537.36 (KHTML, like Gecko) MAXTHON/4.4.3.1000 Chrome/30.0.1599.101 Safari/537.36'),
-        );
-    }
-
-    /**
-     * @dataProvider getUserAgents_whereDNTIsAlwaysEnabled
-     */
-    public function test_isDoNotTrackFound_whenDntActivated_InternetExplorerDoNotTrackIsIgnored($userAgent)
-    {
-        $dntChecker = $this->makeDntHeaderCheckerEnabled();
-
-        $this->activateDoNotTrackInBrowser();
-
-        $_SERVER['HTTP_USER_AGENT'] = $userAgent;
         $this->assertFalse($dntChecker->isDoNotTrackFound());
     }
 
@@ -162,4 +131,3 @@ class DoNotTrackHeaderCheckerTest extends \PHPUnit_Framework_TestCase
         $_SERVER['HTTP_DNT'] = '1';
     }
 }
- 

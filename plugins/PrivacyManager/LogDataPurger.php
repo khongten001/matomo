@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -13,6 +13,7 @@ use Piwik\Container\StaticContainer;
 use Piwik\DataAccess\RawLogDao;
 use Piwik\Date;
 use Piwik\Db;
+use Piwik\Db\TransactionLevel;
 use Piwik\Log;
 use Piwik\LogDeleter;
 use Piwik\Piwik;
@@ -58,23 +59,32 @@ class LogDataPurger
      * - log_conversion_item
      * - log_action
      *
-     * @param int $deleteLogsOlderThan The number of days after which log entires are considered old.
+     * @param int $deleteLogsOlderThan The number of days after which log entries are considered old.
      *                                 Visits and related data whose age is greater than this number
      *                                 will be purged.
+     * @param bool $deleteUnusedLogActions Whether to delete unused log actions or not
      */
-    public function purgeData($deleteLogsOlderThan)
+    public function purgeData($deleteLogsOlderThan, $deleteUnusedLogActions)
     {
         $dateUpperLimit = Date::factory("today")->subDay($deleteLogsOlderThan);
+
+        $transactionLevel = new TransactionLevel(Db::get());
+        $transactionLevel->setUncommitted();
+
         $this->logDeleter->deleteVisitsFor($start = null, $dateUpperLimit->getDatetime());
+
+        $transactionLevel->restorePreviousStatus();
 
         $logTables = self::getDeleteTableLogTables();
 
         // delete unused actions from the log_action table (but only if we can lock tables)
-        if (Db::isLockPrivilegeGranted()) {
-            $this->rawLogDao->deleteUnusedLogActions();
-        } else {
-            $logMessage = get_class($this) . ": LOCK TABLES privilege not granted; skipping unused actions purge";
-            Log::warning($logMessage);
+        if ($deleteUnusedLogActions) {
+            if (Db::isLockPrivilegeGranted()) {
+                $this->rawLogDao->deleteUnusedLogActions();
+            } else {
+                $logMessage = get_class($this) . ": LOCK TABLES privilege not granted; skipping unused actions purge";
+                Log::warning($logMessage);
+            }
         }
 
         /**
@@ -88,7 +98,7 @@ class LogDataPurger
          *     }
          *
          * @param \Piwik\Date $dateUpperLimit A date where visits that occur before this time should be deleted.
-         * @param int $deleteLogsOlderThan The number of days after which log entires are considered old.
+         * @param int $deleteLogsOlderThan The number of days after which log entries are considered old.
          *                                 Visits and related data whose age is greater than this number will be purged.
          */
         Piwik::postEvent('PrivacyManager.deleteLogsOlderThan', array($dateUpperLimit, $deleteLogsOlderThan));
@@ -103,7 +113,7 @@ class LogDataPurger
      * This function returns an array that maps table names with the number of rows
      * that will be deleted.
      *
-     * @param int $deleteLogsOlderThan The number of days after which log entires are considered old.
+     * @param int $deleteLogsOlderThan The number of days after which log entries are considered old.
      *                                 Visits and related data whose age is greater than this number
      *                                 will be purged.
      * @return array

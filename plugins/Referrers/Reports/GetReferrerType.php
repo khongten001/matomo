@@ -1,15 +1,14 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\Referrers\Reports;
 
 use Piwik\Common;
-use Piwik\EventDispatcher;
 use Piwik\Piwik;
 use Piwik\Plugin\ViewDataTable;
 use Piwik\Plugins\CoreVisualizations\Visualizations\HtmlTable;
@@ -102,7 +101,6 @@ class GetReferrerType extends Base
         $view->config->show_search = false;
         $view->config->show_offset_information = false;
         $view->config->show_pagination_control = false;
-        $view->config->show_limit_control      = false;
         $view->config->show_exclude_low_population = false;
         $view->config->addTranslation('label', $labelColumnTitle);
 
@@ -111,7 +109,7 @@ class GetReferrerType extends Base
         if ($view->isViewDataTableId(HtmlTable::ID)) {
             $view->config->disable_subtable_when_show_goals = true;
         }
-        
+
         $this->configureFooterMessage($view);
     }
 

@@ -1,22 +1,17 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link     http://piwik.org
+ * @link     https://matomo.org
  * @license  http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 
 namespace Piwik\Plugins\LanguagesManager\Commands;
 
+use Piwik\Cache;
+use Piwik\Plugin\Manager;
 use Piwik\Plugins\LanguagesManager\API;
-use Symfony\Component\Console\Helper\DialogHelper;
-use Symfony\Component\Console\Input\ArrayInput;
-use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
-use Symfony\Component\Console\Output\NullOutput;
-use Symfony\Component\Console\Output\OutputInterface;
-use Symfony\Component\Console\Helper\ProgressBar;
 
 /**
  */
@@ -26,23 +21,21 @@ class Update extends TranslationBase
     {
         $this->setName('translations:update')
             ->setDescription('Updates translation files')
-            ->addOption('force', 'f', InputOption::VALUE_NONE, 'Force update of all language files')
-            ->addOption('username', 'u', InputOption::VALUE_OPTIONAL, 'Transifex username')
-            ->addOption('password', 'p', InputOption::VALUE_OPTIONAL, 'Transifex password')
-            ->addOption('slug', 's', InputOption::VALUE_OPTIONAL, 'Transifex project slug')
-            ->addOption('plugin', 'P', InputOption::VALUE_OPTIONAL, 'optional name of plugin to update translations for');
+            ->addOptionalValueOption('token', 't', 'Weblate API token')
+            ->addOptionalValueOption('slug', 's', 'Weblate project slug')
+            ->addNoValueOption('all', 'a', 'Force to update all plugins (even non core). Can not be used with plugin option')
+            ->addOptionalValueOption('plugin', 'P', 'optional name of plugin to update translations for');
     }
 
-    protected function execute(InputInterface $input, OutputInterface $output)
+    protected function doExecute(): int
     {
+        $input = $this->getInput();
+        $output = $this->getOutput();
         $output->setDecorated(true);
 
         $start = microtime(true);
 
-        /** @var DialogHelper $dialog */
-        $dialog = $this->getHelperSet()->get('dialog');
-
-        $languages = API::getInstance()->getAvailableLanguageNames();
+        $languages = API::getInstance()->getAvailableLanguageNames(true);
 
         $languageCodes = array();
         foreach ($languages as $languageInfo) {
@@ -50,6 +43,7 @@ class Update extends TranslationBase
         }
 
         $plugin = $input->getOption('plugin');
+        $forceAllPlugins = $input->getOption('all');
 
         if (!$input->isInteractive()) {
             $output->writeln("(!) Non interactive mode: New languages will be skipped");
@@ -57,10 +51,8 @@ class Update extends TranslationBase
 
         $pluginList = array($plugin);
         if (empty($plugin)) {
-            $pluginList = self::getPluginsInCore();
+            $pluginList = $forceAllPlugins ? self::getAllPlugins() : self::getPluginsInCore();
             array_unshift($pluginList, '');
-        } else {
-            $input->setOption('force', true); // force plugin only updates
         }
 
         foreach ($pluginList as $plugin) {
@@ -68,7 +60,7 @@ class Update extends TranslationBase
             $output->writeln("");
 
             // fetch base or specific plugin
-            $this->fetchTranslations($input, $output, $plugin);
+            $this->fetchTranslations($plugin);
 
             $files = _glob(FetchTranslations::getDownloadPath() . DIRECTORY_SEPARATOR . '*.json');
 
@@ -79,14 +71,12 @@ class Update extends TranslationBase
 
             $output->writeln("Starting to import new language files");
 
-            /** @var ProgressBar $progress */
-            $progress = new ProgressBar($output, count($files));
-
-            $progress->start();
+            $this->initProgressBar(count($files));
+            $this->startProgressBar();
 
             foreach ($files as $filename) {
 
-                $progress->advance();
+                $this->advanceProgressBar();
 
                 $code = basename($filename, '.json');
 
@@ -98,7 +88,10 @@ class Update extends TranslationBase
 
                     $createNewFile = false;
                     if ($input->isInteractive()) {
-                        $createNewFile = $dialog->askConfirmation($output, "\nLanguage $code does not exist. Should it be added? ", false);
+                        $createNewFile = $this->askForConfirmation(
+                            "\nLanguage $code does not exist. Should it be added? ",
+                            false
+                        );
                     }
 
                     if (!$createNewFile) {
@@ -106,26 +99,59 @@ class Update extends TranslationBase
                     }
 
                     @touch(PIWIK_DOCUMENT_ROOT . DIRECTORY_SEPARATOR . 'lang' . DIRECTORY_SEPARATOR . $code . '.json');
-                    API::unsetInstance(); // unset language manager instance, so valid names are refetched
+                    API::unsetAllInstances(); // unset language manager instance, so valid names are refetched
+
+                    $this->runCommand('translations:generate-intl-data', ['--language' => $code], !$output->isVeryVerbose());
+
+                    API::unsetAllInstances(); // unset language manager instance, so valid names are refetched
+                    Cache::flushAll();
+
+                    $languageCodes[] = $code;
                 }
 
-                $command = $this->getApplication()->find('translations:set');
-                $arguments = array(
-                    'command' => 'translations:set',
-                    '--code' => $code,
-                    '--file' => $filename,
-                    '--plugin' => $plugin
+                $this->runCommand(
+                    'translations:set',
+                    [
+                        '--code' => $code,
+                        '--file' => $filename,
+                        '--plugin' => $plugin
+                    ],
+                    !$output->isVeryVerbose()
                 );
-                $inputObject = new ArrayInput($arguments);
-                $inputObject->setInteractive($input->isInteractive());
-                $command->run($inputObject, new NullOutput());
             }
 
-            $progress->finish();
+            $this->finishProgressBar();
             $output->writeln('');
         }
 
-        $output->writeln("Finished in " . round(microtime(true)-$start, 3) . "s");
+        $output->writeln("Finished in " . round(microtime(true) - $start, 3) . "s");
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Returns all plugins having their own translations that are bundled in core
+     * @return array
+     */
+    public static function getAllPlugins()
+    {
+        static $pluginsWithTranslations;
+
+        if (!empty($pluginsWithTranslations)) {
+            return $pluginsWithTranslations;
+        }
+
+        $pluginsWithTranslations = array();
+        foreach (Manager::getPluginsDirectories() as $pluginsDir) {
+            $pluginsWithTranslations = array_merge($pluginsWithTranslations, glob(sprintf('%s*/lang/en.json', $pluginsDir)));
+        }
+        $pluginsWithTranslations = array_map(function ($elem) {
+            $replace = Manager::getPluginsDirectories();
+            $replace[] = '/lang/en.json';
+            return str_replace($replace, '', $elem);
+        }, $pluginsWithTranslations);
+
+        return $pluginsWithTranslations;
     }
 
     /**
@@ -150,10 +176,14 @@ class Update extends TranslationBase
         $newPlugins = $matches[1];
 
         $pluginsNotInCore = array_merge($submodulePlugins, $newPlugins);
-
-        $pluginsWithTranslations = glob(sprintf('%s/plugins/*/lang/en.json', PIWIK_INCLUDE_PATH));
+        $pluginsWithTranslations = array();
+        foreach (Manager::getPluginsDirectories() as $pluginsDir) {
+            $pluginsWithTranslations = array_merge($pluginsWithTranslations, glob(sprintf('%s*/lang/en.json', $pluginsDir)));
+        }
         $pluginsWithTranslations = array_map(function ($elem) {
-            return str_replace(array(sprintf('%s/plugins/', PIWIK_INCLUDE_PATH), '/lang/en.json'), '', $elem);
+            $replace = Manager::getPluginsDirectories();
+            $replace[] = '/lang/en.json';
+            return str_replace($replace, '', $elem);
         }, $pluginsWithTranslations);
 
         $pluginsInCore = array_diff($pluginsWithTranslations, $pluginsNotInCore);
@@ -162,47 +192,19 @@ class Update extends TranslationBase
     }
 
     /**
-     * @param InputInterface $input
-     * @param OutputInterface $output
      * @param string $plugin
      * @throws \Exception
      */
-    protected function fetchTranslations(InputInterface $input, OutputInterface $output, $plugin)
+    protected function fetchTranslations($plugin)
     {
-
-        $command = $this->getApplication()->find('translations:fetch');
-        $arguments = array(
-            'command' => 'translations:fetch',
-            '--username' => $input->getOption('username'),
-            '--password' => $input->getOption('password'),
-            '--slug'     => $input->getOption('slug'),
-            '--plugin'   => $plugin
+        $input = $this->getInput();
+        $this->runCommand(
+            'translations:fetch',
+            [
+                '--token'    => $input->getOption('token'),
+                '--slug'     => $input->getOption('slug'),
+                '--plugin'   => $plugin
+            ]
         );
-
-        if ($input->getOption('force')) {
-            $arguments['--lastupdate'] = 1;
-        } else {
-            $lastModDate = strtotime('2015-01-04 00:00:00'); // date of initial transifex setup
-            try {
-                // try to find the language file (of given plugin) with the newest modification date in git log
-                $path = ($plugin ? 'plugins/' . $plugin . '/' : '') . 'lang';
-                $files = explode("\n", trim(shell_exec('git ls-tree -r --name-only HEAD ' . $path)));
-
-                foreach ($files as $file) {
-                    $fileModDate = shell_exec('git log -1 --format="%at" -- ' . $file);
-                    if (basename($file) != 'en.json' && $fileModDate > $lastModDate) {
-                        $lastModDate = $fileModDate;
-                    }
-                }
-            } catch (\Exception $e) {
-            }
-
-            if ($lastModDate != 0) {
-                $arguments['--lastupdate'] = $lastModDate;
-            }
-        }
-        $inputObject = new ArrayInput($arguments);
-        $inputObject->setInteractive($input->isInteractive());
-        $command->run($inputObject, $output);
     }
 }

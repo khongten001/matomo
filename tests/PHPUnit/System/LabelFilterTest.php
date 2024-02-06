@@ -1,12 +1,16 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Tests\System;
 
+use Piwik\DataTable;
+use Piwik\DataTable\Filter\Sort;
+use Piwik\Plugins\Actions\API;
+use Piwik\Request;
 use Piwik\Tests\Framework\TestCase\SystemTestCase;
 use Piwik\Tests\Fixtures\OneVisitSeveralPageViews;
 
@@ -160,12 +164,71 @@ class LabelFilterTest extends SystemTestCase
             )
         ));
 
+        $return[] = array('Actions.getPageUrls', array(
+            'testSuffix'             => '_urlsWithCustomRowId',
+            'idSite'                 => $idSite,
+            'date'                   => $dateTime,
+            'period'                 => 'day',
+            'otherRequestParameters' => array(
+                'label'    => urlencode('1>0'), // using metadata row ID that is set to the row index when ordered by hits desc
+                'expanded' => 0,
+                'with_custom_row_id' => '1',
+            ),
+        ));
+
         return $return;
     }
 
     public static function getOutputPrefix()
     {
         return 'LabelFilter';
+    }
+
+    public static function provideContainerConfigBeforeClass()
+    {
+        return array(
+            'Piwik\Config' => \Piwik\DI::decorate(function ($previous) {
+                $general = $previous->General;
+                $general['action_title_category_delimiter'] = "/";
+                $previous->General = $general;
+                return $previous;
+            }),
+
+            // add report w/ custom row identifier
+            'DocumentationGenerator.customParameters' => \DI\add(['with_custom_row_id']),
+            'observers.global' => \DI\add([
+                ['API.Request.intercept', \DI\value(function (&$returnedValue, $finalParameters, $pluginName, $methodName) {
+                    $request = Request::fromRequest();
+                    if ($pluginName == 'Actions'
+                        && $methodName == 'getPageUrls'
+                        && $request->getParameter('with_custom_row_id', false)
+                    ) {
+                        $table = API::getInstance()->getPageUrls(
+                            $request->getIntegerParameter('idSite'),
+                            $request->getStringParameter('period'),
+                            $request->getStringParameter('date'),
+                            $request->getStringParameter('segment', ''),
+                            $request->getBoolParameter('expanded', false),
+                            $request->getParameter('idSubtable', false),
+                            $request->getParameter('depth', false),
+                            $request->getBoolParameter('flat', false)
+                        );
+
+                        $table->filter(Sort::class, ['nb_hits']);
+
+                        $table->filter(function (DataTable $table) {
+                            $table->setMetadata(DataTable::ROW_IDENTIFIER_METADATA_NAME, 'custom_row_id');
+
+                            foreach ($table->getRows() as $index => $row) {
+                                $row->setMetadata('custom_row_id', $index);
+                            }
+                        });
+
+                        $returnedValue = $table;
+                    }
+                })],
+            ]),
+        );
     }
 }
 

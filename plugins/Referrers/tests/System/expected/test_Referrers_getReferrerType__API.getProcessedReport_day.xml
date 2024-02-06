@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <result>
 	<website>Piwik test</website>
-	<prettyDate>January 1 – March 10, 2010</prettyDate>
+	<prettyDate>January 1 – March 10, 2010</prettyDate>
 	<metadata>
 		<category>Referrers</category>
-		<subcategory>All Referrers</subcategory>
-		<name>Referrer Type</name>
+		<subcategory>All Channels</subcategory>
+		<name>Channel Type</name>
 		<module>Referrers</module>
 		<action>getReferrerType</action>
-		<dimension>Referrer Type</dimension>
-		<documentation>This table contains information about the distribution of the referrer types.&lt;br /&gt;&lt;b&gt;Direct Entry:&lt;/b&gt; A visitor has entered the URL in their browser and started browsing on your website - they entered the website directly.&lt;br /&gt;&lt;b&gt;Search Engines:&lt;/b&gt; A visitor was referred to your website by a search engine. &lt;br /&gt; See the &quot;Search Engines &amp; Keywords&quot; report for more details.&lt;br /&gt;&lt;b&gt;Websites:&lt;/b&gt; The visitor followed a link on another website that led to your site. &lt;br /&gt; See the &quot;Websites&quot; report for more details.&lt;br /&gt;&lt;b&gt;Campaigns:&lt;/b&gt; Visitors that came to your website as the result of a campaign. &lt;br /&gt; See the &quot;Campaigns&quot; report for more details.</documentation>
+		<dimension>Channel Type</dimension>
+		<documentation>This table contains information about the distribution of the channel types.&lt;br /&gt;&lt;b&gt;Direct Entry:&lt;/b&gt; A visitor has entered the URL in their browser and started browsing on your website - they entered the website directly.&lt;br /&gt;&lt;b&gt;Search Engines:&lt;/b&gt; A visitor was referred to your website by a search engine. &lt;br /&gt; See the &quot;Search Engines &amp; Keywords&quot; report for more details.&lt;br /&gt;&lt;b&gt;Websites:&lt;/b&gt; The visitor followed a link on another website that led to your site. &lt;br /&gt; See the &quot;Websites&quot; report for more details.&lt;br /&gt;&lt;b&gt;Campaigns:&lt;/b&gt; Visitors that came to your website as the result of a campaign. &lt;br /&gt; See the &quot;Campaigns&quot; report for more details.</documentation>
 		<metrics>
 			<nb_visits>Visits</nb_visits>
 			<nb_uniq_visitors>Unique visitors</nb_uniq_visitors>
@@ -31,6 +31,16 @@
 			<avg_time_on_site>Avg. Time on Website</avg_time_on_site>
 			<bounce_rate>Bounce Rate</bounce_rate>
 		</processedMetrics>
+		<metricTypes>
+			<nb_visits>number</nb_visits>
+			<nb_uniq_visitors>number</nb_uniq_visitors>
+			<nb_actions>number</nb_actions>
+			<nb_users>number</nb_users>
+			<nb_actions_per_visit>number</nb_actions_per_visit>
+			<avg_time_on_site>duration_s</avg_time_on_site>
+			<bounce_rate>percent</bounce_rate>
+			<conversion_rate>percent</conversion_rate>
+		</metricTypes>
 		<constantRowsCount>1</constantRowsCount>
 		<metricsGoal>
 			<nb_conversions>Conversions</nb_conversions>
@@ -39,12 +49,18 @@
 		<processedMetricsGoal>
 			<revenue_per_visit>Revenue per Visit</revenue_per_visit>
 		</processedMetricsGoal>
+		<metricTypesGoal>
+			<revenue_per_visit>money</revenue_per_visit>
+			<nb_conversions>number</nb_conversions>
+			<conversion_rate>percent</conversion_rate>
+			<revenue>money</revenue>
+		</metricTypesGoal>
 		<imageGraphUrl>index.php?module=API&amp;method=ImageGraph.get&amp;idSite=1&amp;apiModule=Referrers&amp;apiAction=getReferrerType&amp;period=range&amp;date=2010-01-01,2010-03-10</imageGraphUrl>
 		<imageGraphEvolutionUrl>index.php?module=API&amp;method=ImageGraph.get&amp;idSite=1&amp;apiModule=Referrers&amp;apiAction=getReferrerType&amp;period=day&amp;date=2010-01-01,2010-03-10</imageGraphEvolutionUrl>
 		<uniqueId>Referrers_getReferrerType</uniqueId>
 	</metadata>
 	<columns>
-		<label>Referrer Type</label>
+		<label>Channel Type</label>
 		<nb_visits>Visits</nb_visits>
 		<nb_uniq_visitors>Unique visitors</nb_uniq_visitors>
 		<nb_actions>Actions</nb_actions>
@@ -99,7 +115,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -107,7 +123,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -123,7 +139,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -131,7 +147,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -147,7 +163,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -155,7 +171,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -171,7 +187,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -179,7 +195,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -195,7 +211,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -203,7 +219,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -219,7 +235,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -227,7 +243,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -243,7 +259,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -251,7 +267,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -267,7 +283,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -275,7 +291,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -291,7 +307,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -299,7 +315,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -315,7 +331,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -323,7 +339,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -339,7 +355,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -347,7 +363,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -363,7 +379,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -371,7 +387,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -387,7 +403,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -395,7 +411,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -411,7 +427,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -419,7 +435,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -435,7 +451,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -443,7 +459,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -459,7 +475,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -467,7 +483,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -483,7 +499,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -491,7 +507,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -507,7 +523,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -515,7 +531,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -531,7 +547,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -539,7 +555,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -555,7 +571,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -563,7 +579,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -579,7 +595,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -587,7 +603,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -603,7 +619,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -611,7 +627,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -627,7 +643,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -635,7 +651,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -651,7 +667,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -659,7 +675,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -675,7 +691,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -683,7 +699,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -699,7 +715,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -707,7 +723,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -723,7 +739,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -731,7 +747,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -747,7 +763,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -755,7 +771,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -771,7 +787,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -779,7 +795,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -795,7 +811,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -803,7 +819,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -819,7 +835,7 @@
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:00:00</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 			</row>
 			<row>
 				<label>Websites</label>
@@ -827,7 +843,7 @@
 				<nb_visits>1</nb_visits>
 				<nb_actions>1</nb_actions>
 				<nb_users>0</nb_users>
-				<revenue>$ 0</revenue>
+				<revenue>$0</revenue>
 				<nb_actions_per_visit>1</nb_actions_per_visit>
 				<avg_time_on_site>00:06:05</avg_time_on_site>
 				<bounce_rate>100%</bounce_rate>
@@ -876,310 +892,372 @@
 		<result prettyDate="Thursday, February 4, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Friday, February 5, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Saturday, February 6, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Sunday, February 7, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Monday, February 8, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Tuesday, February 9, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Wednesday, February 10, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Thursday, February 11, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Friday, February 12, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Saturday, February 13, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Sunday, February 14, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Monday, February 15, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Tuesday, February 16, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Wednesday, February 17, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Thursday, February 18, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Friday, February 19, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Saturday, February 20, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Sunday, February 21, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Monday, February 22, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Tuesday, February 23, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Wednesday, February 24, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Thursday, February 25, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Friday, February 26, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Saturday, February 27, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Sunday, February 28, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Monday, March 1, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Tuesday, March 2, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Wednesday, March 3, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Thursday, March 4, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Friday, March 5, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
 		<result prettyDate="Saturday, March 6, 2010">
 			<row>
 				<segment>referrerType==search</segment>
+				<referrer_type>2</referrer_type>
 				<idsubdatatable>2</idsubdatatable>
 			</row>
 			<row>
 				<segment>referrerType==website</segment>
+				<referrer_type>3</referrer_type>
 				<idsubdatatable>3</idsubdatatable>
 			</row>
 		</result>
@@ -1189,12 +1267,28 @@
 		<result prettyDate="Wednesday, March 10, 2010" />
 	</reportMetadata>
 	<reportTotal>
-		<nb_visits>62</nb_visits>
 		<nb_uniq_visitors>62</nb_uniq_visitors>
+		<nb_visits>62</nb_visits>
 		<nb_actions>62</nb_actions>
-		<nb_visits_converted>0</nb_visits_converted>
+		<nb_users>0</nb_users>
+		<max_actions>1</max_actions>
+		<sum_visit_length>11315</sum_visit_length>
 		<bounce_count>62</bounce_count>
+		<nb_visits_converted>31</nb_visits_converted>
+		<goals>
+			<row idgoal="1">
+				<nb_conversions>31</nb_conversions>
+				<nb_visits_converted>31</nb_visits_converted>
+				<revenue>0</revenue>
+			</row>
+			<row idgoal="2">
+				<nb_conversions>62</nb_conversions>
+				<nb_visits_converted>31</nb_visits_converted>
+				<revenue>0</revenue>
+			</row>
+		</goals>
 		<nb_conversions>93</nb_conversions>
 		<revenue>0</revenue>
+		<nb_actions_per_visit>31</nb_actions_per_visit>
 	</reportTotal>
 </result>

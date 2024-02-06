@@ -10,14 +10,13 @@
         "LastHours": "Viimased %s tundi",
         "LastMinutes": "Viimased %s minutit",
         "LastVisit": "Viimane külastus",
-        "LinkVisitorLog": "Vaata detailsemat külastuste logi",
         "LoadMoreVisits": "Ava rohkem külastusi",
         "MorePagesNotDisplayed": "rohkem lehti külastaja kohta ei kuvata",
         "NbVisitor": "1 külastaja",
         "NbVisitors": "%s külastajat",
         "NextVisitor": "Järgmine külastaja",
         "NoMoreVisits": "Antud külastajalt rohkem külastusi ei leitud.",
-        "PageRefreshed": "Arv, mitu korda antud lehte vaadati \/ värskendati järjest",
+        "PageRefreshed": "Arv, mitu korda antud lehte vaadati / värskendati järjest",
         "PreviousVisitor": "Eelmine külastaja",
         "RealTimeVisitorCount": "Reaalajas külastuste arv",
         "Referrer_URL": "Viitaja URL",
@@ -27,8 +26,9 @@
         "VisitedPages": "Külastatud lehed",
         "VisitorLog": "Külastuste logi",
         "VisitorProfile": "Külastaja profiil",
-        "VisitorsInRealTime": "Reaalajas külastused",
+        "VisitorsInRealTime": "Külastused reaalajas",
         "VisitorsLastVisit": "Antud külastaja viimane külastus lehel oli %s päeva tagasi.",
-        "VisitsFrom": "%1$s%2$s külastust %3$s pärineb"
+        "VisitsFrom": "%1$s%2$s külastust %3$s pärineb",
+        "VisitsLog": "Külastuste logi"
     }
 }

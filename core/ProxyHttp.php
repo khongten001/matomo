@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -64,12 +64,22 @@ class ProxyHttp
      *                               file should be sent as a different filename to the client you can specify
      *                               a custom filename here.
      */
-    public static function serverStaticFile($file, $contentType, $expireFarFutureDays = 100, $byteStart = false,
-                                            $byteEnd = false, $filename = false)
-    {
+    public static function serverStaticFile(
+        $file,
+        $contentType,
+        $expireFarFutureDays = 100,
+        $byteStart = false,
+        $byteEnd = false,
+        $filename = false
+    ) {
         // if the file cannot be found return HTTP status code '404'
-        if (!file_exists($file)) {
+        if (empty($file) || !file_exists($file)) {
             Common::sendResponseCode(404);
+            return;
+        }
+
+        if (!is_readable($file)) {
+            Common::sendResponseCode(500);
             return;
         }
 
@@ -120,7 +130,7 @@ class ProxyHttp
 
         $phpOutputCompressionEnabled = self::isPhpOutputCompressed();
         if (isset($_SERVER['HTTP_ACCEPT_ENCODING']) && !$phpOutputCompressionEnabled) {
-            list($encoding, $extension) = self::getCompressionEncodingAcceptedByClient();
+            [$encoding, $extension] = self::getCompressionEncodingAcceptedByClient();
             $filegz = $compressedFileLocation . $extension;
 
             if (self::canCompressInPhp()) {
@@ -163,6 +173,29 @@ class ProxyHttp
 
         if ($compressed) {
             Common::sendHeader('Content-Encoding: ' . $encoding);
+        }
+
+        // in case any notices were triggered before this point (eg in WordPress) etc.
+        // it would break the gzipped response since it would have mixed regular notice/string plus gzipped content
+        // and would not be able to decode the response
+        $levels = ob_get_level();
+        for ($i = 0; $i < $levels; $i++) {
+            ob_end_clean();
+        }
+
+        // clearing all output buffers combined with output compressions had bugs on certain PHP versions
+        // manually removing the Content-Encoding header fixes this
+        // See https://github.com/php/php-src/issues/8218
+        if (
+            $phpOutputCompressionEnabled
+            && (
+                version_compare(PHP_VERSION, '8.0.17', '=')
+                || version_compare(PHP_VERSION, '8.0.18', '=')
+                || version_compare(PHP_VERSION, '8.1.4', '=')
+                || version_compare(PHP_VERSION, '8.1.5', '=')
+            )
+        ) {
+            header_remove("Content-Encoding");
         }
 
         if (!_readfile($file, $byteStart, $byteEnd)) {
@@ -239,11 +272,10 @@ class ProxyHttp
     private static function getCompressionEncodingAcceptedByClient()
     {
         $acceptEncoding = $_SERVER['HTTP_ACCEPT_ENCODING'];
-
-        if (preg_match(self::DEFLATE_ENCODING_REGEX, $acceptEncoding, $matches)) {
-            return array('deflate', '.deflate');
-        } elseif (preg_match(self::GZIP_ENCODING_REGEX, $acceptEncoding, $matches)) {
+        if (preg_match(self::GZIP_ENCODING_REGEX, $acceptEncoding, $matches)) {
             return array('gzip', '.gz');
+        } elseif (preg_match(self::DEFLATE_ENCODING_REGEX, $acceptEncoding, $matches)) {
+            return array('deflate', '.deflate');
         } else {
             return array(false, false);
         }
@@ -262,18 +294,31 @@ class ProxyHttp
         return !file_exists($compressedFilePath) || ($toCompressLastModified > $compressedLastModified);
     }
 
-    private static function compressFile($fileToCompress, $compressedFilePath, $compressionEncoding, $byteStart,
-                                         $byteEnd)
-    {
+    private static function compressFile(
+        $fileToCompress,
+        $compressedFilePath,
+        $compressionEncoding,
+        $byteStart,
+        $byteEnd
+    ) {
         $data = file_get_contents($fileToCompress);
         $data = substr($data, $byteStart, $byteEnd - $byteStart);
 
         if ($compressionEncoding == 'deflate') {
             $data = gzdeflate($data, 9);
         } elseif ($compressionEncoding == 'gzip' || $compressionEncoding == 'x-gzip') {
-            $data = gzencode($data, 9);
+            $data = self::gzencode($data);
+        }
+
+        if (false === $data) {
+            throw new \Exception('compressing file ' . $fileToCompress . ' failed');
         }
 
         file_put_contents($compressedFilePath, $data);
+    }
+
+    public static function gzencode($data)
+    {
+        return gzencode($data, 9);
     }
 }

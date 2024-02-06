@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -10,15 +10,13 @@ namespace Piwik\Tests\Unit;
 
 use Piwik\Archive\Chunk;
 use Piwik\DataAccess\ArchiveWriter;
-use Piwik\DataTable;
-use Piwik\Segment;
 
 /**
  * @group ArchiveWriterTest
  * @group Archive
  * @group Core
  */
-class ArchiveWriterTest extends \PHPUnit_Framework_TestCase
+class ArchiveWriterTest extends \PHPUnit\Framework\TestCase
 {
     private $recordName = 'Actions_Action_url';
 
@@ -84,7 +82,7 @@ class ArchiveWriterTest extends \PHPUnit_Framework_TestCase
         for ($i = 0; $i < $numberOfEntries; $i++) {
             $subtableId = $startIndex + $i;
             // we need to append something to make sure it actually moves the correct blob into the correct chunk
-            $blobs[$subtableId] = $this->getSerializedBlob('_'. $subtableId);
+            $blobs[$subtableId] = $this->getSerializedBlob('_' . $subtableId);
         }
 
         return $blobs;
@@ -97,13 +95,19 @@ class ArchiveWriterTest extends \PHPUnit_Framework_TestCase
 
     private function assertInsertBlobRecordInsertedRecordsInBulk($expectedBlobs, $blobs)
     {
-        $writer = $this->getMock('Piwik\DataAccess\ArchiveWriter', array('insertBulkRecords', 'compress'), array(), '', false);
+        $writer = $this->getMockBuilder('Piwik\DataAccess\ArchiveWriter')
+            ->disableOriginalConstructor()
+            ->onlyMethods(array('insertRecord', 'compress'))
+            ->getMock();
         $writer->expects($this->exactly(count($expectedBlobs)))
                ->method('compress')
                ->will($this->returnArgument(0));
-        $writer->expects($this->once())
-               ->method('insertBulkRecords')
-               ->with($expectedBlobs);
+
+        foreach ($expectedBlobs as $index => $expectedBlob) {
+            $writer->expects($this->at($index * 2 + 1))
+                ->method('insertRecord')
+                ->with($this->equalTo($expectedBlob[0]), $this->equalTo($expectedBlob[1]));
+        }
 
         /** @var ArchiveWriter $writer */
         $writer->insertBlobRecord($this->recordName, $blobs);
@@ -111,7 +115,10 @@ class ArchiveWriterTest extends \PHPUnit_Framework_TestCase
 
     private function assertInsertBlobRecordInsertedASingleRecord($expectedBlob, $blob)
     {
-        $writer = $this->getMock('Piwik\DataAccess\ArchiveWriter', array('insertRecord', 'compress'), array(), '', false);
+        $writer = $this->getMockBuilder('Piwik\DataAccess\ArchiveWriter')
+            ->disableOriginalConstructor()
+            ->onlyMethods(array('insertRecord', 'compress'))
+            ->getMock();
         $writer->expects($this->once())
                ->method('compress')
                ->will($this->returnArgument(0));

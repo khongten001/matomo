@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -116,11 +116,10 @@ class Csv extends ReportRenderer
 
         $reportData = $csvRenderer->render($processedReport);
         if (empty($reportData)) {
-            $reportData = Piwik::translate('CoreHome_ThereIsNoDataForThisReport');
+            $reportData = $csvRenderer->formatValue(Piwik::translate('CoreHome_ThereIsNoDataForThisReport'));
         }
 
-        $replaceBySpace = array( $csvRenderer->separator, ";");
-        $reportName = str_replace($replaceBySpace, " ", $processedReport['metadata']['name']);
+        $reportName = $csvRenderer->formatValue($processedReport['metadata']['name']);
         $this->rendered .= implode(
             '',
             array(

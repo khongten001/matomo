@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,20 +10,19 @@ namespace Piwik\Plugins\VisitTime\Reports;
 
 use Piwik\Piwik;
 use Piwik\Plugin\ViewDataTable;
-use Piwik\Plugins\CoreHome\Columns\VisitLastActionTime;
+use Piwik\Plugins\CoreHome\Columns\VisitFirstActionTime;
 use Piwik\Plugins\CoreVisualizations\Visualizations\Graph;
 
 class GetVisitInformationPerServerTime extends Base
 {
-
     protected $defaultSortColumn = '';
 
     protected function init()
     {
         parent::init();
-        $this->dimension     = new VisitLastActionTime();
-        $this->name          = Piwik::translate('VisitTime_ServerTime');
-        $this->documentation = Piwik::translate('VisitTime_WidgetServerTimeDocumentation', array('<strong>', '</strong>'));
+        $this->dimension     = new VisitFirstActionTime();
+        $this->name          = Piwik::translate('VisitTime_SiteTime');
+        $this->documentation = Piwik::translate('VisitTime_WidgetSiteTimeDocumentation', array('<strong>', '</strong>'));
         $this->constantRowsCount = true;
         $this->hasGoalMetrics = true;
         $this->order = 20;

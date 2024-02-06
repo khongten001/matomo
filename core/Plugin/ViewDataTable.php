@@ -1,20 +1,20 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugin;
 
 use Piwik\API\Request;
+use Piwik\API\Request as ApiRequest;
 use Piwik\Common;
 use Piwik\DataTable;
 use Piwik\Period;
 use Piwik\Piwik;
-use Piwik\Plugin\ReportsProvider;
-use Piwik\View;
+use Piwik\Plugins\API\Filter\DataComparisonFilter;
 use Piwik\View\ViewInterface;
 use Piwik\ViewDataTable\Config as VizConfig;
 use Piwik\ViewDataTable\Manager as ViewDataTableManager;
@@ -36,7 +36,7 @@ use Piwik\ViewDataTable\RequestConfig as VizRequest;
  * ViewDataTable instances are not created via the new operator, instead the {@link Piwik\ViewDataTable\Factory}
  * class is used.
  *
- * The specific subclass to create is determined, first, by the **viewDataTable** query paramater.
+ * The specific subclass to create is determined, first, by the **viewDataTable** query parameter.
  * If this parameter is not set, then the default visualization type for the report being
  * displayed is used.
  *
@@ -171,6 +171,8 @@ abstract class ViewDataTable implements ViewInterface
      */
     protected $request;
 
+    private $isComparing = null;
+
     /**
      * Constructor. Initializes display and request properties to their default values.
      * Posts the {@hook ViewDataTable.configure} event which plugins can use to configure the
@@ -211,6 +213,10 @@ abstract class ViewDataTable implements ViewInterface
             $relatedReports = $report->getRelatedReports();
             if (!empty($relatedReports)) {
                 foreach ($relatedReports as $relatedReport) {
+                    if (!$relatedReport) {
+                        continue;
+                    }
+
                     $relatedReportName = $relatedReport->getName();
 
                     $this->config->addRelatedReport($relatedReport->getModule() . '.' . $relatedReport->getAction(),
@@ -228,6 +234,11 @@ abstract class ViewDataTable implements ViewInterface
                 $this->config->addTranslations($processedMetrics);
             }
 
+            $dimension = $report->getDimension();
+            if (!empty($dimension)) {
+                $this->config->addTranslations(['label' => $dimension->getName()]);
+            }
+
             $this->config->title = $report->getName();
 
             $report->configureView($this);
@@ -236,6 +247,9 @@ abstract class ViewDataTable implements ViewInterface
         /**
          * Triggered during {@link ViewDataTable} construction. Subscribers should customize
          * the view based on the report that is being displayed.
+         *
+         * This event is triggered before view configuration properties are overwritten by saved settings or request
+         * parameters. Use this to define default values.
          *
          * Plugins that define their own reports must subscribe to this event in order to
          * specify how the Piwik UI should display the report.
@@ -273,6 +287,31 @@ abstract class ViewDataTable implements ViewInterface
 
         $this->overrideViewPropertiesWithParams($overrideParams);
         $this->overrideViewPropertiesWithQueryParams();
+
+        /**
+         * Triggered after {@link ViewDataTable} construction. Subscribers should customize
+         * the view based on the report that is being displayed.
+         *
+         * This event is triggered after all view configuration values have been overwritten by saved settings or
+         * request parameters. Use this if you need to work with the final configuration values.
+         *
+         * Plugins that define their own reports can subscribe to this event in order to
+         * specify how the Piwik UI should display the report.
+         *
+         * **Example**
+         *
+         *     // event handler
+         *     public function configureViewDataTableEnd(ViewDataTable $view)
+         *     {
+         *         if ($view->requestConfig->apiMethodToRequestDataTable == 'VisitTime.getVisitInformationPerServerTime'
+         *             && $view->requestConfig->flat == 1) {
+         *                 $view->config->show_header_message = 'You are viewing this report flattened';
+         *         }
+         *     }
+         *
+         * @param ViewDataTable $view The instance to configure.
+         */
+        Piwik::postEvent('ViewDataTable.configure.end', array($this));
     }
 
     private function assignRelatedReportsTitle()
@@ -326,7 +365,12 @@ abstract class ViewDataTable implements ViewInterface
             return $this->dataTable;
         }
 
-        $this->dataTable = $this->request->loadDataTableFromAPI();
+        $extraParams = [];
+        if ($this->isComparing()) {
+            $extraParams['compare'] = '1';
+        }
+
+        $this->dataTable = $this->request->loadDataTableFromAPI($extraParams);
 
         return $this->dataTable;
     }
@@ -422,7 +466,7 @@ abstract class ViewDataTable implements ViewInterface
     }
 
     /**
-     * Returns the list of view properties that can be overriden by query parameters.
+     * Returns the list of view properties that can be overridden by query parameters.
      *
      * @return array
      */
@@ -560,4 +604,41 @@ abstract class ViewDataTable implements ViewInterface
         return $paramsCannotBeOverridden;
     }
 
+    /**
+     * Returns true if both this current visualization supports comparison, and if comparison query parameters
+     * are present in the URL.
+     *
+     * @return bool
+     */
+    public function isComparing()
+    {
+        if (!$this->supportsComparison()
+            || $this->config->disable_comparison
+        ) {
+            return false;
+        }
+
+        $request = $this->request->getRequestArray();
+        $request = ApiRequest::getRequestArrayFromString($request);
+
+        $result = DataComparisonFilter::isCompareParamsPresent($request);
+        return $result;
+    }
+
+    /**
+     * Implementations should override this method if they support a special comparison view. By
+     * default, it is assumed visualizations do not support comparison.
+     *
+     * @return bool
+     */
+    public function supportsComparison()
+    {
+        return false;
+    }
+
+    public function getRequestArray()
+    {
+        $requestArray = $this->request->getRequestArray();
+        return ApiRequest::getRequestArrayFromString($requestArray);
+    }
 }

@@ -1,19 +1,21 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Plugins\Goals\Columns\Metrics\GoalSpecific;
 
 use Piwik\Archive\DataTableFactory;
+use Piwik\Columns\Dimension;
 use Piwik\DataTable;
 use Piwik\DataTable\Row;
 use Piwik\Metrics;
 use Piwik\Metrics\Formatter;
 use Piwik\Piwik;
 use Piwik\Plugins\Goals\Columns\Metrics\GoalSpecificProcessedMetric;
+use Piwik\Plugins\Goals\Goals;
 use Piwik\Tracker\GoalManager;
 
 /**
@@ -25,7 +27,7 @@ class AverageOrderRevenue extends GoalSpecificProcessedMetric
 {
     public function getName()
     {
-        return $this->getColumnPrefix() . '_avg_order_revenue';
+        return Goals::makeGoalColumn($this->idGoal, 'avg_order_revenue', false);
     }
 
     public function getTranslatedName()
@@ -64,5 +66,10 @@ class AverageOrderRevenue extends GoalSpecificProcessedMetric
     {
         $this->idSite = DataTableFactory::getSiteIdFromMetadata($table);
         return !empty($this->idSite); // skip formatting if there is no site to get currency info from
+    }
+
+    public function getSemanticType(): ?string
+    {
+        return Dimension::TYPE_MONEY;
     }
 }

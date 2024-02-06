@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -12,7 +12,9 @@ use Piwik\Common;
 use Piwik\DataTable\Filter\CalculateEvolutionFilter;
 use Piwik\Metrics;
 use Piwik\NoAccessException;
+use Piwik\Period;
 use Piwik\Period\Range;
+use Piwik\Piwik;
 use Piwik\Site;
 use Piwik\Url;
 
@@ -40,11 +42,28 @@ class Config extends \Piwik\ViewDataTable\Config
     private $evolutionGraphLinkable = true;
 
     /**
-     * Adds possibility to set html attributes on the sparklines title / headline. For example can be used
-     * to set an angular directive
+     * Adds possibility to set html attributes on the sparklines title / headline.
      * @var string
      */
     public $title_attributes = array();
+
+    /**
+     * Defines custom parameters that will be appended to the sparkline image urls
+     */
+    public $custom_parameters = [];
+
+    /**
+     * If supplied, this function is used to compute the evolution percent displayed next to non-comparison sparkline views.
+     *
+     * The function is passed three parameters:
+     * - an array mapping column names with column values ['column' => 123]
+     * - an array of \Piwik\Plugin\Metrics objects available for the report - useful for formatting values
+     *
+     * compute_evolution(array, array)
+     *
+     * @var callable
+     */
+    public $compute_evolution = null;
 
     public function __construct()
     {
@@ -130,7 +149,7 @@ class Config extends \Piwik\ViewDataTable\Config
      * It will show a sparkline image, the value of the resolved metric name and a descrption. Optionally, multiple
      * values can be shown after a sparkline image by passing multiple metric names
      * (eg array('nb_visits', 'nb_actions')). The data will be requested from the configured api method see
-     * {@link Piwik\ViewDataTable\RequestConfig::$apiMethodToRequestDataTable}.
+     * {@link \Piwik\ViewDataTable\RequestConfig::$apiMethodToRequestDataTable}.
      *
      * Example:
      * $config->addSparklineMetric('nb_visits');
@@ -145,12 +164,15 @@ class Config extends \Piwik\ViewDataTable\Config
      * @param string|array $metricName  Either one metric name (eg 'nb_visits') or an array of metric names
      * @param int|null $order  Defines the order. The lower the order the earlier the sparkline will be displayed.
      *                         By default the sparkline will be appended to the end.
+     * @param array $graphParams The params to use when changing an associated evolution graph. By default this is determined
+     *                           from the sparkline URL, but sometimes the sparkline API method may not match the evolution graph API method.
      */
-    public function addSparklineMetric($metricName, $order = null)
+    public function addSparklineMetric($metricName, $order = null, $graphParams = null)
     {
         $this->sparkline_metrics[] = array(
             'columns' => $metricName,
-            'order'   => $order
+            'order'   => $order,
+            'graphParams' => $graphParams,
         );
     }
 
@@ -167,7 +189,10 @@ class Config extends \Piwik\ViewDataTable\Config
         $this->sparklines[] = array(
             'url' => '',
             'metrics' => array(),
-            'order' => $this->getSparklineOrder($order)
+            'order' => $this->getSparklineOrder($order),
+
+            // adding this group ensures the sparkline will be placed between individual sparklines, and not in their own group together
+            'group' => 'placeholder' . count($this->sparklines),
         );
     }
 
@@ -194,78 +219,125 @@ class Config extends \Piwik\ViewDataTable\Config
      *                                               'tooltip' => '10 visits in 2015-07-26 compared to 20 visits in 2015-07-25')
      * @param int $order                       Defines the order. The lower the order the earlier the sparkline will be
      *                                         displayed. By default the sparkline will be appended to the end.
+     * @param string $title                    The title of this specific sparkline. It is displayed on the left above the sparkline image.
+     * @param string $group                    The ID of the group for this sparkline.
+     * @param int $seriesIndices               The indexes of each series displayed in the sparkline. This determines what color is used for each series. Mainly used for comparison.
+     * @param array $graphParams               The params to use when changing an associated evolution graph. By default this is determined
+     *                                         from the sparkline URL, but sometimes the sparkline API method may not match the evolution graph API method.
      * @throws \Exception In case an evolution parameter is set but has wrong data structure
      */
-    public function addSparkline($requestParamsForSparkline, $value, $description, $evolution = null, $order = null)
+    public function addSparkline($requestParamsForSparkline, $metricInfos, $description, $evolution = null, $order = null, $title = null, $group = '', $seriesIndices = null, $graphParams = null)
     {
         $metrics = array();
 
-        if (is_array($value)) {
-            $values = $value;
+        if ($description === null && is_array($metricInfos)) {
+            $metrics = $metricInfos;
         } else {
-            $values = array($value);
-        }
+            $value = $metricInfos;
 
-        if (!is_array($description)) {
-            $description = array($description);
+            if (is_array($value)) {
+                $values = $value;
+            } else {
+                $values = array($value);
+            }
+
+            if (!is_array($description)) {
+                $description = array($description);
+            }
+
+            if (count($values) === count($description)) {
+                foreach ($values as $index => $value) {
+                    $metrics[] = array(
+                        'value' => $value,
+                        'description' => $description[$index]
+                    );
+                }
+            } else {
+                $msg  = 'The number of values and descriptions need to be the same to add a sparkline. ';
+                $msg .= 'Values: ' . implode(', ', $values) . ' Descriptions: ' . implode(', ', $description);
+                throw new \Exception($msg);
+            }
         }
 
         if (!empty($requestParamsForSparkline['columns'])
             && is_array($requestParamsForSparkline['columns'])
-            && count($requestParamsForSparkline['columns']) === count($values)) {
+            && count($requestParamsForSparkline['columns']) === count($metrics)) {
             $columns = array_values($requestParamsForSparkline['columns']);
         } elseif (!empty($requestParamsForSparkline['columns'])
                   && is_string($requestParamsForSparkline['columns'])
-                  && count($values) === 1) {
+                  && count($metrics) === 1) {
             $columns = array($requestParamsForSparkline['columns']);
         } else{
             $columns = array();
         }
 
-        if (count($values) === count($description)) {
-            foreach ($values as $index => $value) {
-                $metrics[] = array(
-                    'column' => isset($columns[$index]) ? $columns[$index] : '',
-                    'value' => $value,
-                    'description' => $description[$index]
-                );
-            }
-        } else {
-            $msg  = 'The number of values and descriptions need to be the same to add a sparkline. ';
-            $msg .= 'Values: ' . implode(', ', $values). ' Descriptions: ' . implode(', ', $description);
-            throw new \Exception($msg);
+        foreach ($metrics as $index => $metricInfo) {
+            $metrics[$index]['column'] = isset($columns[$index]) ? $columns[$index] : '';
         }
 
         if (empty($metrics)) {
             return;
         }
 
+        $groupedMetrics = [];
+        foreach ($metrics as $metricInfo) {
+            $metricGroup = isset($metricInfo['group']) ? $metricInfo['group'] : '';
+            $groupedMetrics[$metricGroup][] = $metricInfo;
+        }
+
+        $tooltip = $this->generateSparklineTooltip($requestParamsForSparkline);
+
         $sparkline = array(
             'url' => $this->getUrlSparkline($requestParamsForSparkline),
-            'metrics' => $metrics,
-            'order' => $this->getSparklineOrder($order)
+            'tooltip' => $tooltip,
+            'metrics' => $groupedMetrics,
+            'order' => $this->getSparklineOrder($order),
+            'title' => $title,
+            'group' => $group,
+            'seriesIndices' => $seriesIndices,
+            'graphParams' => $graphParams,
         );
 
         if (!empty($evolution)) {
             if (!is_array($evolution) ||
                 !array_key_exists('currentValue', $evolution) ||
-                !array_key_exists('pastValue', $evolution)) {
+                !array_key_exists('pastValue', $evolution)
+            ) {
                 throw new \Exception('In order to show an evolution in the sparklines view a currentValue and pastValue array key needs to be present');
             }
 
             $evolutionPercent = CalculateEvolutionFilter::calculate($evolution['currentValue'], $evolution['pastValue'], $precision = 1);
 
-            // do not display evolution if evolution percent is 0 and current value is 0
-            if ($evolutionPercent != 0 || $evolution['currentValue'] != 0) {
-                $sparkline['evolution'] = array(
-                    'percent' => $evolutionPercent,
-                    'tooltip' => !empty($evolution['tooltip']) ? $evolution['tooltip'] : null
-                );
-            }
-
+            $sparkline['evolution'] = array(
+                'percent' => $evolutionPercent,
+                'isLowerValueBetter' => !empty($evolution['isLowerValueBetter']) ? $evolution['isLowerValueBetter'] : false,
+                'tooltip' => !empty($evolution['tooltip']) ? $evolution['tooltip'] : null,
+                'trend' => $evolution['currentValue'] - $evolution['pastValue'],
+            );
         }
 
         $this->sparklines[] = $sparkline;
+    }
+
+    public function generateSparklineTooltip($params)
+    {
+        $tooltip = '';
+        if (!empty($params['period'])) {
+            $periodTranslated = Piwik::translate('Intl_Period' . ucfirst($params['period']));
+            $tooltip = Piwik::translate('General_SparklineTooltipUsedPeriod', $periodTranslated);
+            if (!empty($params['date'])) {
+                $period = Period\Factory::build('day', $params['date']);
+                $tooltip .= ' ' . Piwik::translate('General_Period') . ': ' . $period->getLocalizedShortString() . '.';
+
+                if (!empty($params['compareDates'])) {
+                    foreach ($params['compareDates'] as $index => $comparisonDate) {
+                        $comparePeriod = Period\Factory::build('day', $comparisonDate);
+                        $tooltip .= ' ' . Piwik::translate('General_Period') . ' ' . ($index + 2) . ': ' . $comparePeriod->getLocalizedShortString() . '.';
+                    }
+                }
+            }
+        }
+        return $tooltip;
     }
 
     /**
@@ -300,7 +372,12 @@ class Config extends \Piwik\ViewDataTable\Config
             return ($a['order'] < $b['order']) ? -1 : 1;
         });
 
-        return $this->sparklines;
+        $sparklines = [];
+        foreach ($this->sparklines as $sparkline) {
+            $group = $sparkline['group'];
+            $sparklines[$group][] = $sparkline;
+        }
+        return $sparklines;
     }
 
     private function getSparklineOrder($order)
@@ -330,10 +407,15 @@ class Config extends \Piwik\ViewDataTable\Config
 
         $params = $this->getGraphParamsModified($customParameters);
 
-        // convert array values to comma separated
-        foreach ($params as &$value) {
-            if (is_array($value)) {
-                $value = rawurlencode(implode(',', $value));
+        foreach ($params as $key => $value) {
+            if (is_array($value) && in_array($key, ['compareDates', 'comparePeriods'])) {
+                foreach ($value as $index => $inner) {
+                    $value[$index] = rawurlencode($inner);
+                }
+                $params[$key] = $value;
+            } elseif (is_array($value)) {
+                // convert array values to comma separated
+                $params[$key] = rawurlencode(implode(',', $value));
             }
         }
         $url = Url::getCurrentQueryStringWithParametersModified($params);
@@ -354,7 +436,7 @@ class Config extends \Piwik\ViewDataTable\Config
      * @throws \Piwik\NoAccessException
      * @return array
      */
-    private function getGraphParamsModified($paramsToSet = array())
+    public function getGraphParamsModified($paramsToSet = array())
     {
         if (!isset($paramsToSet['period'])) {
             $period = Common::getRequestVar('period');
@@ -390,10 +472,13 @@ class Config extends \Piwik\ViewDataTable\Config
             throw new NoAccessException("Website not initialized, check that you are logged in and/or using the correct token_auth.");
         }
 
-        $paramDate = Range::getRelativeToEndDate($period, $range, $endDate, $site);
+        if (!isset($paramsToSet['date'])
+            || !Range::isMultiplePeriod($paramsToSet['date'], $period)
+        ) {
+            $paramsToSet['date'] = Range::getRelativeToEndDate($period, $range, $endDate, $site);
+            $paramsToSet['period'] = $period;
+        }
 
-        $params = array_merge($paramsToSet, array('date' => $paramDate));
-        return $params;
+        return $paramsToSet;
     }
-
 }

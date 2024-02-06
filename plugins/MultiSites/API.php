@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -15,6 +15,7 @@ use Piwik\Common;
 use Piwik\Container\StaticContainer;
 use Piwik\DataTable;
 use Piwik\DataTable\Row;
+use Piwik\Period;
 use Piwik\Period\Range;
 use Piwik\Piwik;
 use Piwik\Plugins\Goals\Archiver;
@@ -66,7 +67,7 @@ class API extends \Piwik\Plugin\API
      * well as the evolution of these values, of all existing sites over a
      * specified period of time.
      *
-     * If the specified period is not a 'range', this function will calculcate
+     * If the specified period is not a 'range', this function will calculate
      * evolution metrics. Evolution metrics are metrics that display the
      * percent increase/decrease of another metric since the last period.
      *
@@ -138,7 +139,6 @@ class API extends \Piwik\Plugin\API
             } else {
                 APISitesManager::getInstance()->getSitesWithAtLeastViewAccess($limit = false, $_restrictSitesToLogin);
             }
-
         } else {
             $sites = Request::processRequest('SitesManager.getPatternMatchSites',
                 array('pattern'   => $pattern,
@@ -161,7 +161,7 @@ class API extends \Piwik\Plugin\API
 
     /**
      * Same as getAll but for a unique Matomo site
-     * @see Piwik\Plugins\MultiSites\API::getAll()
+     * @see \Piwik\Plugins\MultiSites\API::getAll()
      *
      * @param int $idSite Id of the Matomo site
      * @param string $period The period type to get data for.
@@ -188,6 +188,42 @@ class API extends \Piwik\Plugin\API
             $multipleWebsitesRequested = false,
             $showColumns = array()
         );
+    }
+
+    /**
+     * @param null|string  $period
+     * @param null|string  $date
+     * @param false|string $segment
+     * @param string       $pattern
+     * @param int          $filter_limit
+     * @return array
+     * @throws Exception
+     */
+    public function getAllWithGroups($period = null, $date = null, $segment = false, $pattern = '', $filter_limit = 0)
+    {
+        Piwik::checkUserHasSomeViewAccess();
+
+        if (Period::isMultiplePeriod($date, $period)) {
+            throw new Exception('Multiple periods are not supported');
+        }
+
+        $segment = $segment ?: false;
+        $request = $_GET + $_POST;
+
+        $dashboard = new Dashboard($period, $date, $segment);
+
+        if ($pattern !== '') {
+            $dashboard->search(strtolower($pattern));
+        }
+
+        $response = [
+            'numSites' => $dashboard->getNumSites(),
+            'totals'   => $dashboard->getTotals(),
+            'lastDate' => $dashboard->getLastDate(),
+            'sites'    => $dashboard->getSites($request, $filter_limit)
+        ];
+
+        return $response;
     }
 
     private function getSiteFromId($idSite)
@@ -242,7 +278,7 @@ class API extends \Piwik\Plugin\API
 
         // if the period isn't a range & a lastN/previousN date isn't used, we get the same
         // data for the last period to show the evolution of visits/actions/revenue
-        list($strLastDate, $lastPeriod) = Range::getLastDate($date, $period);
+        [$strLastDate, $lastPeriod] = Range::getLastDate($date, $period);
 
         if ($strLastDate !== false) {
 
@@ -266,13 +302,28 @@ class API extends \Piwik\Plugin\API
             }
         }
 
-        // move the site id to a metadata column 
-        $dataTable->queueFilter('MetadataCallbackAddMetadata', array('idsite', 'group', array('\Piwik\Site', 'getGroupFor'), array()));
-        $dataTable->queueFilter('MetadataCallbackAddMetadata', array('idsite', 'main_url', array('\Piwik\Site', 'getMainUrlFor'), array()));
+        // move the site id to a metadata column
+        $dataTable->queueFilter('MetadataCallbackAddMetadata', array('idsite', 'group', function ($idSite) {
+            if ($idSite == '-1') { // Others row might occur when `filter_truncate` API parameter is used
+                return '';
+            }
+            return Site::getGroupFor($idSite);
+        }, array()));
+        $dataTable->queueFilter('MetadataCallbackAddMetadata', array('idsite', 'main_url', function ($idSite) {
+            if ($idSite == '-1') { // Others row might occur when `filter_truncate` API parameter is used
+                return '';
+            }
+            return Site::getMainUrlFor($idSite);
+        }, array()));
 
         // set the label of each row to the site name
         if ($multipleWebsitesRequested) {
-            $dataTable->queueFilter('ColumnCallbackReplace', array('label', '\Piwik\Site::getNameFor'));
+            $dataTable->queueFilter('ColumnCallbackReplace', array('label', function ($idSite) {
+                if ($idSite == '-1') { // Others row might occur when `filter_truncate` API parameter is used
+                    return Piwik::translate('General_Others');
+                }
+                return Site::getNameFor($idSite);
+            }));
         } else {
             $dataTable->queueFilter('ColumnDelete', array('label'));
         }
@@ -289,14 +340,20 @@ class API extends \Piwik\Plugin\API
         ) {
             $dataTable->filter(
                 'ColumnCallbackDeleteRow',
-                array(
-                     self::NB_VISITS_METRIC,
-                     function ($value) {
-                         return $value == 0;
-                     }
-                )
+                [
+                    self::NB_VISITS_METRIC,
+                    function ($value) {
+                        return $value == 0;
+                    }
+                ]
             );
         }
+
+        // Remove <ts_archived> row metadata, it's already been used by any filters that needed it
+        $dataTable->queueFilter(function ($dataTable) {
+            $dataTable->deleteRowsMetadata(DataTable::ARCHIVED_DATE_METADATA_NAME);
+            $dataTable->deleteColumn('_metadata');
+        });
 
         if ($multipleWebsitesRequested && $dataTable->getRowsCount() === 1 && $dataTable instanceof DataTable\Simple) {
             $simpleTable = $dataTable;
@@ -338,11 +395,13 @@ class API extends \Piwik\Plugin\API
                                       ? "Piwik\\Plugins\\MultiSites\\Columns\\Metrics\\EcommerceOnlyEvolutionMetric"
                                       : "Piwik\\Plugins\\CoreHome\\Columns\\Metrics\\EvolutionMetric";
 
+                $extraProcessedMetrics = is_array($extraProcessedMetrics) ? $extraProcessedMetrics : [];
                 $extraProcessedMetrics[] = new $evolutionMetricClass(
                     $metricSettings[self::METRIC_RECORD_NAME_KEY],
                     $pastData,
                     $metricSettings[self::METRIC_EVOLUTION_COL_NAME_KEY],
-                    $quotientPrecision = 1
+                    $quotientPrecision = 1,
+                    $currentData
                 );
             }
             $currentData->setMetadata(DataTable::EXTRA_PROCESSED_METRICS_METADATA_NAME, $extraProcessedMetrics);
@@ -455,7 +514,7 @@ class API extends \Piwik\Plugin\API
     }
 
     /**
-     * Sets the number of total visits in tha pastTable on the dataTable as metadata.
+     * Sets the number of total visits in the pastTable on the dataTable as metadata.
      *
      * @param DataTable $dataTable
      * @param DataTable $pastTable

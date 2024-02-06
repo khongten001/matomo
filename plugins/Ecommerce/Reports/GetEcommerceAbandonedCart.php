@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -24,7 +24,8 @@ class GetEcommerceAbandonedCart extends Base
         $this->parameters = array('idGoal' => Piwik::LABEL_ID_GOAL_IS_ECOMMERCE_CART);
     }
 
-    public function getMetrics() {
+    public function getMetrics()
+    {
         $metrics = parent::getMetrics();
 
         $metrics['nb_conversions'] = Piwik::translate('General_AbandonedCarts');

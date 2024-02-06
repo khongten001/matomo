@@ -1,38 +1,61 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik;
 
+use PHPMailer\PHPMailer\Exception;
+use Piwik\Exception\DI\NotFoundException;
+use Piwik\Exception\DI\DependencyException;
 use Piwik\Container\StaticContainer;
+use Piwik\Email\ContentGenerator;
 use Piwik\Plugins\CoreAdminHome\CustomLogo;
 use Piwik\Translation\Translator;
-use Zend_Mail;
+use Piwik\Log\LoggerInterface;
 
 /**
- * Class for sending mails, for more information see:
- * {@link http://framework.zend.com/manual/en/zend.mail.html}
+ * Class for sending mails
  *
- * @see Zend_Mail, libs/Zend/Mail.php
  * @api
  */
-class Mail extends Zend_Mail
+class Mail
 {
-    /**
-     * Constructor.
-     *
-     * @param string $charset charset, defaults to utf-8
-     */
-    public function __construct($charset = 'utf-8')
+    protected $fromEmail = '';
+    protected $fromName = '';
+    protected $bodyHTML = '';
+    protected $bodyText = '';
+    protected $subject = '';
+    protected $recipients = [];
+    protected $replyTos = [];
+    protected $bccs = [];
+    protected $attachments = [];
+    protected $smtpDebug = false;
+
+    public function __construct()
     {
-        parent::__construct($charset);
-        $this->initSmtpTransport();
     }
 
+    /**
+     * Sets the sender.
+     *
+     * @param string      $email Email address of the sender.
+     * @param null|string $name  Name of the sender.
+     */
+    public function setFrom($email, $name = null)
+    {
+        $this->fromName = $name;
+        $this->fromEmail = $this->parseDomainPlaceholderAsPiwikHostName($email);
+    }
+
+    /**
+     * Sets the default sender
+     *
+     * @throws NotFoundException
+     */
     public function setDefaultFromPiwik()
     {
         $customLogo = new CustomLogo();
@@ -45,7 +68,7 @@ class Mail extends Zend_Mail
         if (empty($fromEmailName) && $customLogo->isEnabled()) {
             $fromEmailName = $translator->translate('CoreHome_WebAnalyticsReports');
         } elseif (empty($fromEmailName)) {
-            $fromEmailName = $translator->translate('ScheduledReports_PiwikReports');
+            $fromEmailName = $translator->translate('TagManager_MatomoTagName');
         }
 
         $fromEmailAddress = Config::getInstance()->General['noreply_email_address'];
@@ -53,100 +76,269 @@ class Mail extends Zend_Mail
     }
 
     /**
-     * Sets the sender.
+     * Returns the address the mail will be sent from
      *
-     * @param string $email Email address of the sender.
-     * @param null|string $name Name of the sender.
-     * @return Zend_Mail
+     * @return string
      */
-    public function setFrom($email, $name = null)
+    public function getFrom()
     {
-        return parent::setFrom(
-            $this->parseDomainPlaceholderAsPiwikHostName($email),
-            $name
-        );
+        return $this->fromEmail;
     }
 
     /**
-     * Set Reply-To Header
+     * Returns the address the mail will be sent from
      *
-     * @param string $email
-     * @param null|string $name
-     * @return Zend_Mail
+     * @return string
      */
-    public function setReplyTo($email, $name = null)
+    public function getFromName()
     {
-        return parent::setReplyTo(
-            $this->parseDomainPlaceholderAsPiwikHostName($email),
-            $name
-        );
+        return $this->fromName;
     }
 
     /**
-     * @return void
+     * @param View|string $body
+     * @throws DependencyException
+     * @throws NotFoundException
      */
-    private function initSmtpTransport()
+    public function setWrappedHtmlBody($body)
     {
-        $mailConfig = Config::getInstance()->mail;
-
-        if (empty($mailConfig['host'])
-            || $mailConfig['transport'] != 'smtp'
-        ) {
-            return;
-        }
-
-        $smtpConfig = array();
-        if (!empty($mailConfig['type'])) {
-            $smtpConfig['auth'] = strtolower($mailConfig['type']);
-        }
-
-        if (!empty($mailConfig['username'])) {
-            $smtpConfig['username'] = $mailConfig['username'];
-        }
-
-        if (!empty($mailConfig['password'])) {
-            $smtpConfig['password'] = $mailConfig['password'];
-        }
-
-        if (!empty($mailConfig['encryption'])) {
-            $smtpConfig['ssl'] = $mailConfig['encryption'];
-        }
-        
-        if (!empty($mailConfig['port'])) {
-            $smtpConfig['port'] = $mailConfig['port'];
-        }
-
-        $host = trim($mailConfig['host']);
-        $tr = new \Zend_Mail_Transport_Smtp($host, $smtpConfig);
-        Mail::setDefaultTransport($tr);
+        $contentGenerator = StaticContainer::get(ContentGenerator::class);
+        $bodyHtml = $contentGenerator->generateHtmlContent($body);
+        $this->bodyHTML = $bodyHtml;
     }
 
-    public function send($transport = null)
+    /**
+     * Sets the HTML part of the mail
+     *
+     * @param $html
+     */
+    public function setBodyHtml($html)
     {
-        if (defined('PIWIK_TEST_MODE')) { // hack
-            Piwik::postTestEvent("Test.Mail.send", array($this));
-        } else {
-            return parent::send($transport);
-        }
+        $this->bodyHTML = $html;
     }
 
-    public function createAttachment($body, $mimeType = null, $disposition = null, $encoding = null, $filename = null)
+    /**
+     * Sets the text part of the mail.
+     * If bodyHtml is set, this will be used as alternative text part
+     *
+     * @param $txt
+     */
+    public function setBodyText($txt)
     {
-        $filename = $this->sanitiseString($filename);
-        return parent::createAttachment($body, $mimeType, $disposition, $encoding, $filename);
+        $this->bodyText = $txt;
     }
 
+    /**
+     * Returns html content of the mail
+     *
+     * @return string
+     */
+    public function getBodyHtml()
+    {
+        return $this->bodyHTML;
+    }
+
+    /**
+     * Returns text content of the mail
+     *
+     * @return string
+     */
+    public function getBodyText()
+    {
+        return $this->bodyText;
+    }
+
+    /**
+     * Sets the subject of the mail
+     *
+     * @param $subject
+     */
     public function setSubject($subject)
     {
         $subject = $this->sanitiseString($subject);
-        return parent::setSubject($subject);
+        $this->subject = $subject;
     }
 
     /**
-     * @param string $email
+     * Return the subject of the mail
+     *
      * @return string
      */
-    protected function parseDomainPlaceholderAsPiwikHostName($email)
+    public function getSubject()
+    {
+        return $this->subject;
+    }
+
+    /**
+     * Adds a recipient
+     *
+     * @param string $address
+     * @param string $name
+     */
+    public function addTo($address, $name = '')
+    {
+        $this->recipients[$address] = $name;
+    }
+
+    /**
+     * Returns the list of recipients
+     *
+     * @return array
+     */
+    public function getRecipients()
+    {
+        return $this->recipients;
+    }
+
+    /**
+     * Add Bcc address
+     *
+     * @param string $email
+     * @param string $name
+     */
+    public function addBcc($email, $name = '')
+    {
+        $this->bccs[$email] = $name;
+    }
+
+    /**
+     * Returns the list of bcc addresses
+     *
+     * @return array
+     */
+    public function getBccs()
+    {
+        return $this->bccs;
+    }
+
+    /**
+     * Removes all recipients and bccs from the list
+     */
+    public function clearAllRecipients()
+    {
+        $this->recipients = [];
+        $this->bccs = [];
+    }
+
+    /**
+     * Add Reply-To address
+     *
+     * @param string $email
+     * @param string $name
+     */
+    public function addReplyTo($email, $name = '')
+    {
+        $this->replyTos[$this->parseDomainPlaceholderAsPiwikHostName($email)] = $name;
+    }
+
+    /**
+     * Sets the reply to address (all previously added addresses will be removed)
+     *
+     * @param string $email
+     * @param string $name
+     */
+    public function setReplyTo($email, $name = '')
+    {
+        $this->replyTos = [];
+        $this->addReplyTo($email, $name);
+    }
+
+    /**
+     * Returns the list of reply to addresses
+     *
+     * @return array
+     */
+    public function getReplyTos()
+    {
+        return $this->replyTos;
+    }
+
+    public function addAttachment($body, $mimeType = '', $filename = null, $cid = null)
+    {
+        $filename = $this->sanitiseString($filename);
+        $this->attachments[] = [
+            'content' => $body,
+            'filename' => $filename,
+            'mimetype' => $mimeType,
+            'cid' => $cid
+        ];
+    }
+
+    public function getAttachments()
+    {
+        return $this->attachments;
+    }
+
+    /**
+     * Sends the mail
+     *
+     * @return bool|null returns null if sending the mail was aborted by the Mail.send event
+     * @throws DependencyException
+     * @throws NotFoundException
+     * @throws Exception
+     */
+    public function send()
+    {
+        if (!$this->shouldSendMail()) {
+            return false;
+        }
+
+        $mail = $this;
+
+        /**
+         * This event is posted right before an email is sent. You can use it to customize the email by, for example, replacing
+         * the subject/body, changing the from address, etc.
+         *
+         * @param Mail $mail The Mail instance that is about to be sent.
+         */
+        Piwik::postEvent('Mail.send', [$mail]);
+
+        return StaticContainer::get('Piwik\Mail\Transport')->send($mail);
+    }
+
+    /**
+     * If the send email process throws an exception, we catch it and log it
+     *
+     * @return void
+     * @throws NotFoundException
+     * @throws DependencyException
+     */
+    public function safeSend()
+    {
+        try {
+            $this->send();
+        } catch (\Exception $e) {
+            // we do nothing but log if the email send was unsuccessful
+            StaticContainer::get(LoggerInterface::class)->warning('Could not send {class} email: {exception}', ['class' => get_class($this), 'exception' => $e]);
+        }
+    }
+
+    /**
+     * Enables SMTP debugging
+     *
+     * @param bool $smtpDebug
+     */
+    public function setSmtpDebug($smtpDebug = true)
+    {
+        $this->smtpDebug = $smtpDebug;
+    }
+
+    /**
+     * Returns whether SMTP debugging is enabled or not
+     *
+     * @return bool
+     */
+    public function isSmtpDebugEnabled()
+    {
+        return $this->smtpDebug;
+    }
+
+    /**
+     * Returns the hostname mails will be sent from
+     *
+     * @return string
+     */
+    public function getMailHost()
     {
         $hostname  = Config::getInstance()->mail['defaultHostnameIfEmpty'];
         $piwikHost = Url::getCurrentHost($hostname);
@@ -157,7 +349,16 @@ class Mail extends Zend_Mail
         if ($this->isHostDefinedAndNotLocal($url)) {
             $piwikHost = $url['host'];
         }
+        return $piwikHost;
+    }
 
+    /**
+     * @param string $email
+     * @return string
+     */
+    protected function parseDomainPlaceholderAsPiwikHostName($email)
+    {
+        $piwikHost = $this->getMailHost();
         return str_replace('{DOMAIN}', $piwikHost, $email);
     }
 
@@ -176,11 +377,34 @@ class Mail extends Zend_Mail
      * @param $string
      * @return mixed
      */
-    function sanitiseString($string)
+    public function sanitiseString($string)
     {
         $search = array('–', '’');
         $replace = array('-', '\'');
         $string = str_replace($search, $replace, $string);
         return $string;
+    }
+
+    private function shouldSendMail()
+    {
+        $config = Config::getInstance();
+        $general = $config->General;
+        if (empty($general['emails_enabled'])) {
+            return false;
+        }
+
+        $shouldSendMail = true;
+
+        $mail = $this;
+
+        /**
+         * This event is posted before sending an email. You can use it to abort sending a specific email, if you want.
+         *
+         * @param bool &$shouldSendMail Whether to send this email or not. Set to false to skip sending.
+         * @param Mail $mail The Mail instance that will be sent.
+         */
+        Piwik::postEvent('Mail.shouldSend', [&$shouldSendMail, $mail]);
+
+        return $shouldSendMail;
     }
 }

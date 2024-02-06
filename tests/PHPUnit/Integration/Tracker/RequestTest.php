@@ -1,16 +1,16 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Integration\Tracker;
 
+use Matomo\Network\IPUtils;
+use Piwik\Config;
 use Piwik\Piwik;
-use Piwik\Plugins\CustomVariables\CustomVariables;
-use Piwik\Plugins\UsersManager\API;
 use Piwik\Plugins\UsersManager\Model;
 use Piwik\Plugins\UsersManager\UsersManager;
 use Piwik\Tests\Framework\Fixture;
@@ -31,154 +31,306 @@ class RequestTest extends IntegrationTestCase
      */
     private $request;
 
-    public function setUp()
+    private $time;
+
+    protected static function beforeTableDataCached()
+    {
+        parent::beforeTableDataCached();
+
+        Fixture::createWebsite('2014-01-01 00:00:00');
+        Fixture::createWebsite('2014-01-01 00:00:00');
+        foreach (range(3, 14) as $idSite) {
+            Fixture::createWebsite('2014-01-01 00:00:00');
+        }
+    }
+
+    public function setUp(): void
     {
         parent::setUp();
 
-        Fixture::createWebsite('2014-01-01 00:00:00');
-        Fixture::createWebsite('2014-01-01 00:00:00');
         Cache::deleteTrackerCache();
 
         $this->request = $this->buildRequest(array('idsite' => '1'));
+        $this->time = 1416795617;
     }
 
-    public function test_getCustomVariablesInVisitScope_ShouldReturnNoCustomVars_IfNoWerePassedInParams()
+    public function test_getVisitorId_noData()
     {
-        $this->assertEquals(array(), $this->request->getCustomVariablesInVisitScope());
+        $request = $this->buildRequest(array());
+        $this->assertFalse($request->getVisitorId());
     }
 
-    public function test_getCustomVariablesInVisitScope_ShouldReturnNoCustomVars_IfPassedParamIsNotAnArray()
+    public function test_getVisitorId_idParam()
     {
-        $this->assertCustomVariablesInVisitScope(array(), '{"mykey":"myval"}');
+        $request = $this->buildRequest(array('_id' => '1234567890ABCDEF'));
+        $this->assertSame('1234567890abcdef', bin2hex($request->getVisitorId()));
     }
 
-    public function test_getCustomVariablesInVisitScope_ShouldReturnCustomVars_IfTheyAreValid()
+    public function test_getVisitorId_userIdOverwritesVisitorId()
     {
-        $customVars = $this->buildCustomVars(array('mykey' => 'myval', 'test' => 'value'));
-        $expected   = $this->buildExpectedCustomVars(array('mykey' => 'myval', 'test' => 'value'));
-
-        $this->assertCustomVariablesInVisitScope($expected, $customVars);
+        $request = $this->buildRequest(array('_id' => '1234567890ABCDEF', 'uid' => 'foo'));
+        $this->assertSame('0beec7b5ea3f0fdb', bin2hex($request->getVisitorId()));
     }
 
-    public function test_getCustomVariablesInVisitScope_ShouldIgnoreIndexesLowerThan1()
+    public function test_getVisitorId_notOverwritesWhenDisabled()
     {
-        $customVars = array(
-            array('mykey', 'myval'),
-            array('test', 'value'),
-        );
-        $expected   = $this->buildExpectedCustomVars(array('test' => 'value'));
-
-        $this->assertCustomVariablesInVisitScope($expected, json_encode($customVars));
+        $config = Config::getInstance();
+        $tracker = $config->Tracker;
+        $tracker['enable_userid_overwrites_visitorid'] = 0;
+        $config->Tracker = $tracker;
+        $request = $this->buildRequest(array('_id' => '1234567890ABCDEF', 'uid' => 'foo'));
+        $this->assertSame('1234567890abcdef', bin2hex($request->getVisitorId()));
     }
 
-    public function test_getCustomVariablesInVisitScope_ShouldTruncateValuesIfTheyAreTooLong()
+    public function test_cdt_ShouldNotTrackTheRequest_IfNotAuthenticatedAndTimestampIsNotRecent()
     {
-        $maxLen = CustomVariables::getMaxLengthCustomVariables();
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Custom timestamp is 86500 seconds old');
 
-        $customVars = $this->buildCustomVars(array(
-            'mykey' => 'myval',
-            'test'  => str_pad('test', $maxLen + 5, 't'),
-        ));
-        $expected = $this->buildExpectedCustomVars(array(
-            'mykey' => 'myval',
-            'test'  => str_pad('test', $maxLen, 't'),
-        ));
-
-        $this->assertCustomVariablesInVisitScope($expected, $customVars);
+        $request = $this->buildRequest(array('cdt' => '' . ($this->time - 86500)));
+        $request->setCurrentTimestamp($this->time);
+        $this->assertSame($this->time, $request->getCurrentTimestamp());
     }
 
-    public function test_getCustomVariablesInVisitScope_ShouldIgnoreVarsThatDoNotHaveKeyAndValue()
+    private function setTrackerExcludedConfig($exclude)
     {
-        $customVars = array(
-            1 => array('mykey', 'myval'),
-            2 => array('test'),
-        );
-        $expected = $this->buildExpectedCustomVars(array('mykey' => 'myval'));
-
-        $this->assertCustomVariablesInVisitScope($expected, json_encode($customVars));
+        $config  = Config::getInstance();
+        $tracker = $config->Tracker;
+        $tracker['exclude_requests'] = $exclude;
+        $config->Tracker = $tracker;
     }
 
-    public function test_getCustomVariablesInVisitScope_ShouldSetDefaultValueToEmptyStringAndHandleOtherTypes()
+    public function test_isRequestExcluded_nothingConfigured()
     {
-        $input = array(
-            'myfloat'  => 5.55,
-            'myint'    => 53,
-            'mystring' => '',
-        );
-        $customVars = $this->buildCustomVars($input);
-        $expected   = $this->buildExpectedCustomVars($input);
-
-        $this->assertCustomVariablesInVisitScope($expected, $customVars);
+        $request = $this->buildRequest(array('cdt' => '' . ($this->time - 86500)));
+        $this->assertFalse($request->isRequestExcluded());
     }
 
-    public function test_getCustomVariablesInPageScope_ShouldReturnNoCustomVars_IfNoWerePassedInParams()
+    public function test_isRequestExcluded_notValidExpression()
     {
-        $this->assertEquals(array(), $this->request->getCustomVariablesInPageScope());
+        $this->setTrackerExcludedConfig('foo=bar');
+        $request = $this->buildRequest(array('foo' => 'bar'));
+        $this->assertFalse($request->isRequestExcluded());
     }
 
-    public function test_getCustomVariablesInPageScope_ShouldReturnNoCustomVars_IfPassedParamIsNotAnArray()
+    public function test_isRequestExcluded_emptyRightValue()
     {
-        $this->assertCustomVariablesInPageScope(array(), '{"mykey":"myval"}');
+        $this->setTrackerExcludedConfig('foo==');
+
+        $request = $this->buildRequest(array('foo' => ''));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array());
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'b'));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $this->setTrackerExcludedConfig('foo!=');
+
+        $request = $this->buildRequest(array('foo' => ''));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array());
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'b'));
+        $this->assertTrue($request->isRequestExcluded());
     }
 
-    public function test_getCustomVariablesInPageScope_ShouldReturnCustomVars_IfTheyAreValid()
+    public function test_isRequestExcluded_equals()
     {
-        $customVars = $this->buildCustomVars(array('mykey' => 'myval', 'test' => 'value'));
-        $expected   = $this->buildExpectedCustomVars(array('mykey' => 'myval', 'test' => 'value'));
+        $this->setTrackerExcludedConfig('foo==bar');
 
-        $this->assertCustomVariablesInPageScope($expected, $customVars);
+        $request = $this->buildRequest(array('foo' => 'bar'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'bar1'));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo1' => 'bar'));
+        $this->assertFalse($request->isRequestExcluded());
     }
 
-    public function test_getCustomVariablesInPageScope_ShouldIgnoreIndexesLowerThan1()
+    public function test_isRequestExcluded_not_equals()
     {
-        $customVars = array(
-            array('mykey', 'myval'),
-            array('test', 'value'),
-        );
-        $expected   = $this->buildExpectedCustomVars(array('test' => 'value'));
+        $this->setTrackerExcludedConfig('foo!=bar');
 
-        $this->assertCustomVariablesInPageScope($expected, json_encode($customVars));
+        $request = $this->buildRequest(array('foo' => 'bar'));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'bar1'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo1' => 'bar'));
+        $this->assertTrue($request->isRequestExcluded());
     }
 
-    public function test_getCustomVariablesInPageScope_ShouldTruncateValuesIfTheyAreTooLong()
+    public function test_isRequestExcluded_contains()
     {
-        $maxLen = CustomVariables::getMaxLengthCustomVariables();
+        $this->setTrackerExcludedConfig('foo=@bar');
 
-        $customVars = $this->buildCustomVars(array(
-            'mykey' => 'myval',
-            'test'  => str_pad('test', $maxLen + 5, 't'),
-        ));
-        $expected = $this->buildExpectedCustomVars(array(
-            'mykey' => 'myval',
-            'test'  => str_pad('test', $maxLen, 't'),
-        ));
+        $request = $this->buildRequest(array('foo' => 'bar'));
+        $this->assertTrue($request->isRequestExcluded());
 
-        $this->assertCustomVariablesInPageScope($expected, $customVars);
+        $request = $this->buildRequest(array('foo' => 'bar1'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'fffbar1'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo1' => 'bar'));
+        $this->assertFalse($request->isRequestExcluded());
     }
 
-    public function test_getCustomVariablesInPageScope_ShouldIgnoreVarsThatDoNotHaveKeyAndValue()
+    public function test_isRequestExcluded_notContains()
     {
-        $customVars = array(
-            1 => array('mykey', 'myval'),
-            2 => array('test'),
-        );
-        $expected = $this->buildExpectedCustomVars(array('mykey' => 'myval'));
+        $this->setTrackerExcludedConfig('foo!@bar');
 
-        $this->assertCustomVariablesInPageScope($expected, json_encode($customVars));
+        $request = $this->buildRequest(array('foo' => 'bar'));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'bar1'));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'fffbar1'));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'hello'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'ba'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo1' => 'bar'));
+        $this->assertTrue($request->isRequestExcluded());
     }
 
-    public function test_getCustomVariablesInPageScope_ShouldSetDefaultValueToEmptyStringAndHandleOtherTypes()
+    public function test_isRequestExcluded_startsWith()
     {
-        $input = array(
-            'myfloat'  => 5.55,
-            'myint'    => 53,
-            'mystring' => '',
-        );
-        $customVars = $this->buildCustomVars($input);
-        $expected   = $this->buildExpectedCustomVars($input);
+        $this->setTrackerExcludedConfig('foo=^bar');
 
-        $this->assertCustomVariablesInPageScope($expected, $customVars);
+        $request = $this->buildRequest(array('foo' => 'bar'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'bar1'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'fffbar1'));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo1' => 'bar'));
+        $this->assertFalse($request->isRequestExcluded());
     }
+
+    public function test_isRequestExcluded_endsWith()
+    {
+        $this->setTrackerExcludedConfig('foo=$bar');
+
+        $request = $this->buildRequest(array('foo' => 'bar'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'bar1'));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo' => 'fffbar'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('foo1' => 'bar'));
+        $this->assertFalse($request->isRequestExcluded());
+    }
+
+    public function test_isRequestExcluded_multipleComparisons()
+    {
+        $this->setTrackerExcludedConfig('foo==test,bar==foo%2Cbar');
+
+        $request = $this->buildRequest(array('foo' => 'test'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('bar' => 'foo,bar'));
+        $this->assertTrue($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('bar' => 'foo%2Cbar'));
+        $this->assertFalse($request->isRequestExcluded());
+
+        $request = $this->buildRequest(array('bar' => 'foo'));
+        $this->assertFalse($request->isRequestExcluded());
+    }
+
+    public function test_cdt_ShouldReturnTheCustomTimestamp_IfNotAuthenticatedButTimestampIsRecent()
+    {
+        $request = $this->buildRequest(array('cdt' => '' . ($this->time - 5)));
+        $request->setCurrentTimestamp($this->time);
+
+        $this->assertSame(($this->time - 5), $request->getCurrentTimestamp());
+    }
+
+    public function test_cdt_ShouldReturnTheCustomTimestamp_IfAuthenticatedAndValid()
+    {
+        $request = $this->buildRequest(array('cdt' => '' . ($this->time - 86500)));
+        $request->setCurrentTimestamp($this->time);
+        $request->setIsAuthenticated();
+        $this->assertSame(($this->time - 86500), $request->getCurrentTimestamp());
+    }
+
+    public function test_cdt_ShouldReturnTheCustomTimestamp_IfTimestampIsInFuture()
+    {
+        $request = $this->buildRequest(array('cdt' => '' . ($this->time + 30800)));
+        $request->setCurrentTimestamp($this->time);
+        $this->assertSame($this->time, $request->getCurrentTimestamp());
+    }
+
+    public function test_cdt_ShouldReturnTheCustomTimestamp_ShouldUseStrToTime_IfItIsNotATime()
+    {
+        $request = $this->buildRequest(array('cdt' => '10 years ago'));
+        $request->setCurrentTimestamp($this->time);
+        $request->setIsAuthenticated();
+        $this->assertNotSame($this->time, $request->getCurrentTimestamp());
+        $this->assertNotEmpty($request->getCurrentTimestamp());
+    }
+
+    public function test_getIdSite()
+    {
+        $request = $this->buildRequest(array('idsite' => '14'));
+        $this->assertSame(14, $request->getIdSite());
+    }
+
+    public function test_getIdSite_shouldNotThrowException_IfValueIsZero()
+    {
+        $this->expectException(\Piwik\Exception\UnexpectedWebsiteFoundException::class);
+        $this->expectExceptionMessage('Invalid idSite: \'0\'');
+
+        $request = $this->buildRequest(array('idsite' => '0'));
+        $request->getIdSite();
+    }
+
+    public function test_getIdSite_shouldThrowException_IfValueIsLowerThanZero()
+    {
+        $this->expectException(\Piwik\Exception\UnexpectedWebsiteFoundException::class);
+        $this->expectExceptionMessage('Invalid idSite: \'-1\'');
+
+        $request = $this->buildRequest(array('idsite' => '-1'));
+        $request->getIdSite();
+    }
+
+    public function test_getIpString_ShouldDefaultToServerAddress()
+    {
+        $this->assertEquals($_SERVER['REMOTE_ADDR'], $this->request->getIpString());
+    }
+
+    public function test_getIpString_ShouldReturnCustomIp_IfAuthenticated()
+    {
+        $request = $this->buildRequest(array('cip' => '192.192.192.192'));
+        $request->setIsAuthenticated();
+        $this->assertEquals('192.192.192.192', $request->getIpString());
+    }
+
+    public function test_getIp()
+    {
+        $ip = $_SERVER['REMOTE_ADDR'];
+        $this->assertEquals(IPUtils::stringToBinaryIP($ip), $this->request->getIp());
+    }
+
 
     public function test_isAuthenticated_ShouldBeNotAuthenticatedInTestsByDefault()
     {
@@ -293,37 +445,14 @@ class RequestTest extends IntegrationTestCase
         $login = 'myadmin';
         $passwordHash = UsersManager::getPasswordHash('password');
 
-        $token = API::getInstance()->createTokenAuth($login);
-
         $user = new Model();
-        $user->addUser($login, $passwordHash, 'admin@piwik', 'alias', $token, '2014-01-01 00:00:00');
+        $token = $user->generateRandomTokenAuth();
+
+        $user->addUser($login, $passwordHash, 'admin@piwik', '2014-01-01 00:00:00');
         $user->addUserAccess($login, 'admin', array($idSite));
+        $user->addTokenAuth($login, $token, 'createAdminUserForSite', '2014-01-01 00:00:00');
 
         return $token;
-    }
-
-    public function test_internalBuildExpectedCustomVars()
-    {
-        $this->assertEquals(array(), $this->buildExpectedCustomVars(array()));
-
-        $this->assertEquals(array('custom_var_k1' => 'key', 'custom_var_v1' => 'val'),
-                            $this->buildExpectedCustomVars(array('key' => 'val')));
-
-        $this->assertEquals(array(
-            'custom_var_k1' => 'key', 'custom_var_v1' => 'val',
-            'custom_var_k2' => 'key2', 'custom_var_v2' => 'val2',
-        ), $this->buildExpectedCustomVars(array('key' => 'val', 'key2' => 'val2')));
-    }
-
-    public function test_internalBuildCustomVars()
-    {
-        $this->assertEquals('[]', $this->buildCustomVars(array()));
-
-        $this->assertEquals('{"1":["key","val"]}',
-                            $this->buildCustomVars(array('key' => 'val')));
-
-        $this->assertEquals('{"1":["key","val"],"2":["key2","val2"]}',
-                            $this->buildCustomVars(array('key' => 'val', 'key2' => 'val2')));
     }
 
     public function test_getIdSite_shouldTriggerEventAndReturnThatIdSite()
@@ -339,14 +468,27 @@ class RequestTest extends IntegrationTestCase
         $this->assertSame(12, $request->getIdSite());
     }
 
+
     /**
      * @group invalidChars
      * @dataProvider getInvalidCharacterUrls
      */
-    public function testInvalidCharacterRemoval($url, $expectedUrl)
+    public function testInvalidCharacterRemovalForUtf8($url, $expectedUrl)
     {
+        Config::getInstance()->database['charset'] = 'utf8';
         $request = $this->buildRequest(array('url' => $url));
         $this->assertEquals($expectedUrl, $request->getParam('url'));
+    }
+
+    /**
+     * @group invalidChars
+     * @dataProvider getInvalidCharacterUrls
+     */
+    public function test4ByteCharacterRemainForUtf8mb4($url, $expectedUrl)
+    {
+        Config::getInstance()->database['charset'] = 'utf8mb4';
+        $request = $this->buildRequest(array('url' => $url));
+        $this->assertEquals($url, $request->getParam('url'));
     }
 
     public function getInvalidCharacterUrls()
@@ -366,43 +508,19 @@ class RequestTest extends IntegrationTestCase
         );
     }
 
-    private function assertCustomVariablesInVisitScope($expectedCvars, $cvarsJsonEncoded)
+    public function test_getIdSite_shouldTriggerExceptionWhenSiteNotExists()
     {
-        $request = $this->buildRequest(array('_cvar' => $cvarsJsonEncoded));
-        $this->assertEquals($expectedCvars, $request->getCustomVariablesInVisitScope());
-    }
+        $this->expectException(\Piwik\Exception\UnexpectedWebsiteFoundException::class);
+        $this->expectExceptionMessage('An unexpected website was found in the request: website id was set to \'155\'');
 
-    private function assertCustomVariablesInPageScope($expectedCvars, $cvarsJsonEncoded)
-    {
-        $request = $this->buildRequest(array('cvar' => $cvarsJsonEncoded));
-        $this->assertEquals($expectedCvars, $request->getCustomVariablesInPageScope());
-    }
+        $self = $this;
+        Piwik::addAction('Tracker.Request.getIdSite', function (&$idSite, $params) use ($self) {
+            $self->assertSame(14, $idSite);
+            $self->assertEquals(array('idsite' => '14'), $params);
+            $idSite = 155;
+        });
 
-    private function buildExpectedCustomVars($customVars)
-    {
-        $vars  = array();
-        $index = 1;
-
-        foreach ($customVars as $key => $value) {
-            $vars['custom_var_k' . $index] = $key;
-            $vars['custom_var_v' . $index] = $value;
-            $index++;
-        }
-
-        return $vars;
-    }
-
-    private function buildCustomVars($customVars)
-    {
-        $vars  = array();
-        $index = 1;
-
-        foreach ($customVars as $key => $value) {
-            $vars[$index] = array($key, $value);
-            $index++;
-        }
-
-        return json_encode($vars);
+        $this->buildRequest(array('idsite' => '14'))->getIdSite();
     }
 
     private function buildRequest($params)

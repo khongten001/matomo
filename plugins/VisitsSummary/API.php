@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,9 +11,9 @@ namespace Piwik\Plugins\VisitsSummary;
 use Piwik\Archive;
 use Piwik\Metrics\Formatter;
 use Piwik\Piwik;
-use Piwik\Plugin\Report;
 use Piwik\Plugin\ReportsProvider;
 use Piwik\SettingsPiwik;
+use Piwik\Url;
 
 /**
  * VisitsSummary API lets you access the core web analytics metrics (visits, unique visitors,
@@ -41,16 +41,6 @@ class API extends \Piwik\Plugin\API
         }
 
         return $dataTable;
-    }
-
-    /**
-     * @ignore
-     */
-    public function getColumns($period)
-    {
-        $columns = $this->getCoreColumns($period);
-        $columns = array_merge($columns, array('bounce_rate', 'nb_actions_per_visit', 'avg_time_on_site'));
-        return $columns;
     }
 
     protected function getCoreColumns($period)
@@ -146,7 +136,7 @@ class API extends \Piwik\Plugin\API
         if (!SettingsPiwik::isUniqueVisitorsEnabled($period)) {
             throw new \Exception(
                 "The metric " . $metric . " is not enabled for the requested period. " .
-                "Please see this FAQ: https://matomo.org/faq/how-to/faq_113/"
+                "Please see this FAQ: " . Url::addCampaignParametersToMatomoLink('https://matomo.org/faq/how-to/faq_113/')
             );
         }
     }

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,9 +11,12 @@ namespace Piwik\Session;
 
 use Piwik\Auth;
 use Piwik\AuthResult;
+use Piwik\Config;
+use Piwik\Container\StaticContainer;
 use Piwik\Date;
 use Piwik\Plugins\UsersManager\Model as UsersModel;
 use Piwik\Session;
+use Piwik\Log\LoggerInterface;
 
 /**
  * Validates already authenticated sessions.
@@ -37,9 +40,11 @@ class SessionAuth implements Auth
     /**
      * Set internally so it can be queried in FrontController.
      *
-     * @var string
+     * @var array
      */
     private $user;
+
+    private $tokenAuth;
 
     public function __construct(UsersModel $userModel = null, $shouldDestroySession = true)
     {
@@ -54,12 +59,14 @@ class SessionAuth implements Auth
 
     public function setTokenAuth($token_auth)
     {
-        // empty
+        $this->tokenAuth = $token_auth;
     }
 
     public function getLogin()
     {
-        return $this->user['login'];
+        if (isset($this->user['login'])) {
+            return $this->user['login'];
+        }
     }
 
     public function getTokenAuthSecret()
@@ -87,6 +94,13 @@ class SessionAuth implements Auth
         $sessionFingerprint = new SessionFingerprint();
         $userModel = $this->userModel;
 
+        $this->checkIfSessionFailedToRead();
+
+        if ($this->isExpiredSession($sessionFingerprint)) {
+            $sessionFingerprint->clear();
+            return $this->makeAuthFailure();
+        }
+
         $userForSession = $sessionFingerprint->getUser();
         if (empty($userForSession)) {
             return $this->makeAuthFailure();
@@ -99,18 +113,27 @@ class SessionAuth implements Auth
             return $this->makeAuthFailure();
         }
 
-        if (!$sessionFingerprint->isMatchingCurrentRequest()) {
-            $this->initNewBlankSession($sessionFingerprint);
-            return $this->makeAuthFailure();
-        }
-
         $tsPasswordModified = !empty($user['ts_password_modified']) ? $user['ts_password_modified'] : null;
         if ($this->isSessionStartedBeforePasswordChange($sessionFingerprint, $tsPasswordModified)) {
             $this->destroyCurrentSession($sessionFingerprint);
             return $this->makeAuthFailure();
         }
 
-        return $this->makeAuthSuccess($user);
+        $this->updateSessionExpireTime($sessionFingerprint);
+
+        if ($this->tokenAuth !== null
+            && $this->tokenAuth !== false
+            && $this->tokenAuth !== $sessionFingerprint->getSessionTokenAuth()) {
+            return $this->makeAuthFailure();
+        }
+
+        if ($sessionFingerprint->getSessionTokenAuth()) {
+            $tokenAuth = $sessionFingerprint->getSessionTokenAuth();
+        } else {
+            $tokenAuth = $this->userModel->generateRandomTokenAuth();
+        }
+
+        return $this->makeAuthSuccess($user, $tokenAuth);
     }
 
     private function isSessionStartedBeforePasswordChange(SessionFingerprint $sessionFingerprint, $tsPasswordModified)
@@ -134,14 +157,15 @@ class SessionAuth implements Auth
         return new AuthResult(AuthResult::FAILURE, null, null);
     }
 
-    private function makeAuthSuccess($user)
+    private function makeAuthSuccess($user, $tokenAuth)
     {
         $this->user = $user;
+        $this->tokenAuth = $tokenAuth;
 
         $isSuperUser = (int) $user['superuser_access'];
         $code = $isSuperUser ? AuthResult::SUCCESS_SUPERUSER_AUTH_CODE : AuthResult::SUCCESS;
 
-        return new AuthResult($code, $user['login'], $user['token_auth']);
+        return new AuthResult($code, $user['login'], $tokenAuth);
     }
 
     protected function initNewBlankSession(SessionFingerprint $sessionFingerprint)
@@ -175,6 +199,46 @@ class SessionAuth implements Auth
 
     public function getTokenAuth()
     {
-        return $this->user['token_auth'];
+        return $this->tokenAuth;
+    }
+
+    private function updateSessionExpireTime(SessionFingerprint $sessionFingerprint)
+    {
+        $sessionParams = session_get_cookie_params();
+
+        // we update the session cookie to make sure expired session cookies are not available client side...
+        $sessionCookieLifetime = Config::getInstance()->General['login_cookie_expire'];
+        Session::writeCookie(
+            session_name(),
+            session_id(),
+            time() + $sessionCookieLifetime,
+            $sessionParams['path'],
+            $sessionParams['domain'],
+            $sessionParams['secure'],
+            $sessionParams['httponly'],
+            Session::getSameSiteCookieValue()
+        );
+
+        // ...and we also update the expiration time stored server side so we can prevent expired sessions from being reused
+        $sessionFingerprint->updateSessionExpirationTime();
+    }
+
+    private function isExpiredSession(SessionFingerprint $sessionFingerprint)
+    {
+        $expirationTime = $sessionFingerprint->getExpirationTime();
+        if (empty($expirationTime)) {
+            return true;
+        }
+
+        $isExpired = Date::now()->getTimestampUTC() > $expirationTime;
+        return $isExpired;
+    }
+
+    private function checkIfSessionFailedToRead()
+    {
+        if (Session\SaveHandler\DbTable::$wasSessionToLargeToRead) {
+            StaticContainer::get(LoggerInterface::class)->warning(
+                "Too much data stored in the session so it could not be read properly. If you were logged out, this is why.");
+        }
     }
 }

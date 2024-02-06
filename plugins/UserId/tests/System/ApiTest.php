@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -37,7 +37,7 @@ class ApiTest extends SystemTestCase
     {
         $api = 'UserId.getUsers';
         $startDate = substr(self::$fixture->dateTime, 0, 10);
-        $endDate = date('Y-m-d', strtotime($startDate) + 3600*24*365);
+        $endDate = date('Y-m-d', strtotime($startDate) + 3600 * 24 * 365);
 
         $apiToTest   = array();
         $apiToTest[] = array(
@@ -148,7 +148,6 @@ class ApiTest extends SystemTestCase
     {
         return dirname(__FILE__);
     }
-
 }
 
 ApiTest::$fixture = new TrackFewVisitsAndCreateUsers();

@@ -7,8 +7,9 @@
 		<nb_actions>1</nb_actions>
 		<nb_users>0</nb_users>
 		<max_actions>1</max_actions>
-		<sum_visit_length>0</sum_visit_length>
+		<sum_visit_length>1</sum_visit_length>
 		<bounce_count>1</bounce_count>
+		<nb_visits_converted>1</nb_visits_converted>
 		<goals>
 			<row idgoal='2'>
 				<nb_conversions>1</nb_conversions>
@@ -18,6 +19,7 @@
 		</goals>
 		<nb_conversions>1</nb_conversions>
 		<revenue>1</revenue>
+		<segment>referrerType==search;referrerKeyword==purchase</segment>
 		<referer_type>2</referer_type>
 	</row>
 	<row>
@@ -29,6 +31,7 @@
 		<max_actions>8</max_actions>
 		<sum_visit_length>1621</sum_visit_length>
 		<bounce_count>0</bounce_count>
+		<nb_visits_converted>1</nb_visits_converted>
 		<goals>
 			<row idgoal='1'>
 				<nb_conversions>1</nb_conversions>
@@ -38,6 +41,7 @@
 		</goals>
 		<nb_conversions>1</nb_conversions>
 		<revenue>42</revenue>
+		<segment>referrerName==referrer.com</segment>
 		<referer_type>3</referer_type>
 	</row>
 </result>

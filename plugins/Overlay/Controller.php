@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -14,15 +14,15 @@ use Piwik\Common;
 use Piwik\Config;
 use Piwik\Metrics;
 use Piwik\Piwik;
-use Piwik\Plugin\Report;
 use Piwik\Plugins\Actions\ArchivingHelper;
 use Piwik\Plugins\SegmentEditor\SegmentFormatter;
 use Piwik\Plugins\SitesManager\API as APISitesManager;
 use Piwik\ProxyHttp;
-use Piwik\Segment;
+use Piwik\Session;
 use Piwik\Tracker\Action;
 use Piwik\Tracker\PageUrl;
 use Piwik\View;
+use Piwik\Plugins\SitesManager;
 
 class Controller extends \Piwik\Plugin\Controller
 {
@@ -42,6 +42,12 @@ class Controller extends \Piwik\Plugin\Controller
     {
         Piwik::checkUserHasViewAccess($this->idSite);
 
+        // Overlay needs to send requests w/ the session cookie from within the tracked website, which means
+        // we can't use SameSite=Lax. So, we regenerate the session ID here (in Session.php there is a hardcoded
+        // check for Overlay, so will be set to SameSite=None).
+        // Note: this means the new session ID will have SameSite=None until it regenerates on a non-Overlay page.
+        Session::regenerateId();
+
         $template = '@Overlay/index';
         if (Config::getInstance()->General['overlay_disable_framed_mode']) {
             $template = '@Overlay/index_noframe';
@@ -53,7 +59,9 @@ class Controller extends \Piwik\Plugin\Controller
         $view->segment = Request::getRawSegmentFromRequest();
 
         $view->ssl = ProxyHttp::isHttps();
+        $view->siteUrls = SitesManager\API::getInstance()->getSiteUrlsFromId($this->site->getId());
 
+        $this->securityPolicy->allowEmbedPage();
         $this->outputCORSHeaders();
         return $view->render();
     }
@@ -61,7 +69,6 @@ class Controller extends \Piwik\Plugin\Controller
     /** Render the area left of the iframe */
     public function renderSidebar()
     {
-        $idSite = Common::getRequestVar('idSite');
         $period = Common::getRequestVar('period');
         $date = Common::getRequestVar('date');
         $currentUrl = Common::getRequestVar('currentUrl');
@@ -69,7 +76,7 @@ class Controller extends \Piwik\Plugin\Controller
         $currentUrl = Common::unsanitizeInputValue($currentUrl);
         $segmentSidebar = '';
 
-        $normalizedCurrentUrl = PageUrl::excludeQueryParametersFromUrl($currentUrl, $idSite);
+        $normalizedCurrentUrl = PageUrl::excludeQueryParametersFromUrl($currentUrl, $this->idSite);
         $normalizedCurrentUrl = Common::unsanitizeInputValue($normalizedCurrentUrl);
 
         // load the appropriate row of the page urls report using the label filter
@@ -79,7 +86,7 @@ class Controller extends \Piwik\Plugin\Controller
         $label = implode('>', $path);
 
         $params = array(
-            'idSite' => $idSite,
+            'idSite' => $this->idSite,
             'date' => $date,
             'period' => $period,
             'label' => $label,
@@ -146,11 +153,11 @@ class Controller extends \Piwik\Plugin\Controller
         $view->location = $page;
         $view->normalizedUrl = $normalizedCurrentUrl;
         $view->label = $label;
-        $view->idSite = $idSite;
+        $view->idSite = $this->idSite;
         $view->period = $period;
         $view->date = $date;
         $view->segment = $segmentSidebar;
-        $view->segmentDescription = $this->segmentFormatter->getHumanReadable($segment, $idSite);
+        $view->segmentDescription = $this->segmentFormatter->getHumanReadable($segment, $this->idSite);
 
         $this->outputCORSHeaders();
         return $view->render();
@@ -162,20 +169,21 @@ class Controller extends \Piwik\Plugin\Controller
      */
     public function startOverlaySession()
     {
-        $idSite = Common::getRequestVar('idSite', 0, 'int');
-        Piwik::checkUserHasViewAccess($idSite);
+        $this->checkSitePermission();
+        Piwik::checkUserHasViewAccess($this->idSite);
 
         $view = new View('@Overlay/startOverlaySession');
 
         $sitesManager = APISitesManager::getInstance();
-        $site = $sitesManager->getSiteFromId($idSite);
-        $urls = $sitesManager->getSiteUrlsFromId($idSite);
+        $site = $sitesManager->getSiteFromId($this->idSite);
+        $urls = $sitesManager->getSiteUrlsFromId($this->idSite);
 
         $view->isHttps   = ProxyHttp::isHttps();
         $view->knownUrls = json_encode($urls);
         $view->mainUrl   = $site['main_url'];
 
         $this->outputCORSHeaders();
+        $view->setUseStrictReferrerPolicy(false);
         Common::sendHeader('Content-Type: text/html; charset=UTF-8');
 
         return $view->render();
@@ -187,28 +195,24 @@ class Controller extends \Piwik\Plugin\Controller
      */
     public function showErrorWrongDomain()
     {
-        $idSite = Common::getRequestVar('idSite', 0, 'int');
-        Piwik::checkUserHasViewAccess($idSite);
+        $this->checkSitePermission();
+        Piwik::checkUserHasViewAccess($this->idSite);
 
         $url = Common::getRequestVar('url', '');
-        $url = Common::unsanitizeInputValue($url);
 
-        $message = Piwik::translate('Overlay_RedirectUrlError', array($url, "\n"));
-        $message = nl2br(htmlentities($message, ENT_COMPAT | ENT_HTML401, 'UTF-8'));
+        $message = Piwik::translate('Overlay_RedirectUrlError', [$url, '<br />']);
 
         $view = new View('@Overlay/showErrorWrongDomain');
         $this->addCustomLogoInfo($view);
         $view->message = $message;
 
-        if (Piwik::isUserHasWriteAccess($idSite)) {
-            // TODO use $idSite to link to the correct row. This is tricky because the #rowX ids don't match
-            // the site ids when sites have been deleted.
+        if (Piwik::isUserHasWriteAccess($this->idSite)) {
             $url = 'index.php?module=SitesManager&action=index';
-            $troubleshoot = htmlentities(Piwik::translate('Overlay_RedirectUrlErrorAdmin'), ENT_COMPAT | ENT_HTML401, 'UTF-8');
+            $troubleshoot = Piwik::translate('Overlay_RedirectUrlErrorAdmin');
             $troubleshoot = sprintf($troubleshoot, '<a href="' . $url . '" target="_top">', '</a>');
             $view->troubleshoot = $troubleshoot;
         } else {
-            $view->troubleshoot = htmlentities(Piwik::translate('Overlay_RedirectUrlErrorUser'), ENT_COMPAT | ENT_HTML401, 'UTF-8');
+            $view->troubleshoot = Piwik::translate('Overlay_RedirectUrlErrorUser');
         }
 
         $this->outputCORSHeaders();

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -17,9 +17,9 @@ use Piwik\DataTable\Simple;
 /**
  * @group DataTableTest
  */
-class DataTable_Renderer_XMLTest extends \PHPUnit_Framework_TestCase
+class XMLTest extends \PHPUnit\Framework\TestCase
 {
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
         Manager::getInstance()->deleteAll();
@@ -60,7 +60,7 @@ class DataTable_Renderer_XMLTest extends \PHPUnit_Framework_TestCase
     {
         $array = array('max_actions' => 14.0, 'nb_uniq_visitors' => 57.0, 'nb_visits' => 66.0, 'nb_actions' => 151.0, 'sum_visit_length' => 5118.0, 'bounce_count' => 44.0,);
 
-        $table = new Simple;
+        $table = new Simple();
         $table->addRowsFromArray($array);
         return $table;
     }
@@ -69,21 +69,21 @@ class DataTable_Renderer_XMLTest extends \PHPUnit_Framework_TestCase
     {
         $array = array('nb_visits' => 14.0);
 
-        $table = new Simple;
+        $table = new Simple();
         $table->addRowsFromArray($array);
         return $table;
     }
 
     protected function _getDataTableEmpty()
     {
-        $table = new DataTable;
+        $table = new DataTable();
         return $table;
     }
 
     protected function _getDataTableSimpleOneZeroRowTest()
     {
         $array = array('nb_visits' => 0);
-        $table = new Simple;
+        $table = new Simple();
         $table->addRowsFromArray($array);
         return $table;
     }
@@ -91,7 +91,7 @@ class DataTable_Renderer_XMLTest extends \PHPUnit_Framework_TestCase
     protected function _getDataTableSimpleOneFalseRowTest()
     {
         $array = array('is_excluded' => false);
-        $table = new Simple;
+        $table = new Simple();
         $table->addRowsFromArray($array);
         return $table;
     }
@@ -290,14 +290,14 @@ class DataTable_Renderer_XMLTest extends \PHPUnit_Framework_TestCase
     protected function _getDataTableSimpleMapTest()
     {
         $array1 = array('max_actions' => 14.0, 'nb_uniq_visitors' => 57.0,);
-        $table1 = new Simple;
+        $table1 = new Simple();
         $table1->addRowsFromArray($array1);
 
         $array2 = array('max_actions' => 140.0, 'nb_uniq_visitors' => 570.0,);
-        $table2 = new Simple;
+        $table2 = new Simple();
         $table2->addRowsFromArray($array2);
 
-        $table3 = new Simple;
+        $table3 = new Simple();
 
         $table = new DataTable\Map();
         $table->setKeyName('testKey');
@@ -311,13 +311,13 @@ class DataTable_Renderer_XMLTest extends \PHPUnit_Framework_TestCase
     protected function _getDataTableSimpleOneRowMapTest()
     {
         $array1 = array('nb_visits' => 14.0);
-        $table1 = new Simple;
+        $table1 = new Simple();
         $table1->addRowsFromArray($array1);
         $array2 = array('nb_visits' => 15.0);
-        $table2 = new Simple;
+        $table2 = new Simple();
         $table2->addRowsFromArray($array2);
 
-        $table3 = new Simple;
+        $table3 = new Simple();
 
         $table = new DataTable\Map();
         $table->setKeyName('testKey');
@@ -608,6 +608,88 @@ class DataTable_Renderer_XMLTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals($expected, $render->render());
     }
 
+    public function test_render_withRowsWithDataTableMetadata()
+    {
+        $dataTable = new DataTable();
+
+        $row = new DataTable\Row();
+        $row->addColumn('nb_visits', 5);
+        $row->addColumn('nb_random', 10);
+
+        $otherDataTable = new DataTable();
+        $otherDataTable->addRowsFromSimpleArray([
+            ['nb_visits' => 6, 'nb_random' => 7],
+            ['nb_visits' => 8, 'nb_random' => 9],
+        ]);
+        $row->setComparisons($otherDataTable);
+
+        $dataTable->addRow($row);
+
+        $render = new Xml();
+        $render->setTable($dataTable);
+        $actual = $render->render();
+
+        $expected = '<?xml version="1.0" encoding="utf-8" ?>
+<result>
+	<row>
+		<nb_visits>5</nb_visits>
+		<nb_random>10</nb_random>
+		<comparisons>
+			<row>
+				<nb_visits>6</nb_visits>
+				<nb_random>7</nb_random>
+			</row>
+			<row>
+				<nb_visits>8</nb_visits>
+				<nb_random>9</nb_random>
+			</row>
+		</comparisons>
+	</row>
+</result>';
+
+        $this->assertEquals($expected, $actual);
+    }
+
+    public function test_render_withRowsWithDataTableMetadataInSimpleTable()
+    {
+        $dataTable = new Simple();
+
+        $row = new DataTable\Row();
+        $row->addColumn('nb_visits', 5);
+        $row->addColumn('nb_random', 10);
+
+        $otherDataTable = new DataTable();
+        $otherDataTable->addRowsFromSimpleArray([
+            ['nb_visits' => 6, 'nb_random' => 7],
+            ['nb_visits' => 8, 'nb_random' => 9],
+        ]);
+        $row->setComparisons($otherDataTable);
+
+        $dataTable->addRow($row);
+
+        $render = new Xml();
+        $render->setTable($dataTable);
+        $actual = $render->render();
+
+        $expected = '<?xml version="1.0" encoding="utf-8" ?>
+<result>
+	<nb_visits>5</nb_visits>
+	<nb_random>10</nb_random>
+	<comparisons>
+		<row>
+			<nb_visits>6</nb_visits>
+			<nb_random>7</nb_random>
+		</row>
+		<row>
+			<nb_visits>8</nb_visits>
+			<nb_random>9</nb_random>
+		</row>
+	</comparisons>
+</result>';
+
+        $this->assertEquals($expected, $actual);
+    }
+
     private function _getDataTableSimpleWithInvalidChars()
     {
         $table = new DataTable\Simple();
@@ -624,5 +706,47 @@ class DataTable_Renderer_XMLTest extends \PHPUnit_Framework_TestCase
             array("$%@(%" => 1, "avbs$" => 2, "b/" => 2)
         );
         return $table;
+    }
+
+    public function testRenderDataTableWithArray()
+    {
+        $data = new DataTable();
+
+        $row = new Row();
+        $row->addColumn('c', array(1, 2, 3, 4));
+        $row->addColumn('e', array('f' => ['k' => [5, 6], 'l' => [7, 8], 'm' => [9, 10]]));
+        $data->addRow($row);
+
+        $render = new Xml();
+        $render->setTable($data);
+        $expected = '<?xml version="1.0" encoding="utf-8" ?>
+<result>
+	<row>
+		<c>
+		<row>1</row>
+		<row>2</row>
+		<row>3</row>
+		<row>4</row>
+		</c>
+		<e>
+			<row>
+				<k>
+				<row>5</row>
+				<row>6</row>
+				</k>
+				<l>
+				<row>7</row>
+				<row>8</row>
+				</l>
+				<m>
+				<row>9</row>
+				<row>10</row>
+				</m>
+			</row>
+		</e>
+	</row>
+</result>';
+
+        $this->assertEquals($expected, $render->render());
     }
 }

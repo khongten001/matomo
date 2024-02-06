@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -28,6 +28,7 @@ class Model
         Filesystem::unlinkTargetFilesNotPresentInSource($source . '/core', $target . '/core');
         Filesystem::unlinkTargetFilesNotPresentInSource($source . '/libs', $target . '/libs');
         Filesystem::unlinkTargetFilesNotPresentInSource($source . '/vendor', $target . '/vendor');
+        Filesystem::unlinkTargetFilesNotPresentInSource($source . '/node_modules', $target . '/node_modules');
 
         foreach ($this->getPluginsFromDirectoy($source) as $pluginDir) {
             Filesystem::unlinkTargetFilesNotPresentInSource($source . $pluginDir, $target . $pluginDir);

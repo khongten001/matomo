@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,17 +11,18 @@ namespace Piwik\Plugins\CoreHome;
 use Exception;
 use Piwik\API\Request;
 use Piwik\Common;
+use Piwik\DataTable\Renderer\Json;
 use Piwik\Date;
 use Piwik\FrontController;
 use Piwik\Notification\Manager as NotificationManager;
 use Piwik\Piwik;
 use Piwik\Plugin\Report;
+use Piwik\Plugins\Marketplace\Marketplace;
+use Piwik\SettingsPiwik;
 use Piwik\Widget\Widget;
 use Piwik\Plugins\CoreHome\DataTableRowAction\MultiRowEvolution;
 use Piwik\Plugins\CoreHome\DataTableRowAction\RowEvolution;
-use Piwik\Plugins\Dashboard\DashboardManagerControl;
 use Piwik\Plugins\UsersManager\API;
-use Piwik\Site;
 use Piwik\Translation\Translator;
 use Piwik\UpdateCheck;
 use Piwik\Url;
@@ -42,7 +43,7 @@ class Controller extends \Piwik\Plugin\Controller
 
         parent::__construct();
     }
-    
+
     public function getDefaultAction()
     {
         return 'redirectToCoreHomeIndex';
@@ -93,13 +94,13 @@ class Controller extends \Piwik\Plugin\Controller
         if ($config->getName() && Common::getRequestVar('showtitle', '', 'string') === '1') {
             if (strpos($content, '<h2') !== false
                 || strpos($content, ' content-title=') !== false
-                || strpos($content, ' piwik-enriched-headline') !== false
+                || strpos($content, 'CoreHome.EnrichedHeadline') !== false
                 || strpos($content, '<h1') !== false ) {
                 // already includes title
                 return $content;
             }
 
-            if (strpos($content, 'piwik-content-block') === false
+            if (strpos($content, '<!-- has-content-block -->') === false
                 && strpos($content, 'class="card"') === false
                 && strpos($content, "class='card'") === false
                 && strpos($content, 'class="card-content"') === false
@@ -116,7 +117,10 @@ class Controller extends \Piwik\Plugin\Controller
 
     function redirectToCoreHomeIndex()
     {
-        $defaultReport = API::getInstance()->getUserPreference(Piwik::getCurrentUserLogin(), API::PREFERENCE_DEFAULT_REPORT);
+        $defaultReport = API::getInstance()->getUserPreference(
+            API::PREFERENCE_DEFAULT_REPORT,
+            Piwik::getCurrentUserLogin()
+        );
         $module = 'CoreHome';
         $action = 'index';
 
@@ -131,8 +135,7 @@ class Controller extends \Piwik\Plugin\Controller
             $module = Piwik::getLoginPluginName();
         }
 
-        $idSite = Common::getRequestVar('idSite', false, 'int');
-        parent::redirectToIndex($module, $action, $idSite);
+        parent::redirectToIndex($module, $action, $this->idSite);
     }
 
     public function showInContext()
@@ -154,16 +157,26 @@ class Controller extends \Piwik\Plugin\Controller
 
     public function markNotificationAsRead()
     {
+        Piwik::checkUserHasSomeViewAccess();
+        $this->checkTokenInUrl();
+
         $notificationId = Common::getRequestVar('notificationId');
         NotificationManager::cancel($notificationId);
+
+        Json::sendHeaderJSON();
+        return json_encode(true);
     }
 
     protected function getDefaultIndexView()
     {
+        if (SettingsPiwik::isInternetEnabled() && Marketplace::isMarketplaceEnabled()) {
+            $this->securityPolicy->addPolicy('img-src', '*.matomo.org');
+            $this->securityPolicy->addPolicy('default-src', '*.matomo.org');
+        }
+
         $view = new View('@CoreHome/getDefaultIndexView');
         $this->setGeneralVariablesView($view);
         $view->showMenu = true;
-        $view->dashboardSettingsControl = new DashboardManagerControl();
         $view->content = '';
         return $view;
     }
@@ -177,19 +190,15 @@ class Controller extends \Piwik\Plugin\Controller
             return;
         }
 
-        $websiteId = Common::getRequestVar('idSite', false, 'int');
-
-        if ($websiteId) {
-
-            $website = new Site($websiteId);
-            $datetimeCreationDate      = $website->getCreationDate()->getDatetime();
-            $creationDateLocalTimezone = Date::factory($datetimeCreationDate, $website->getTimezone())->toString('Y-m-d');
-            $todayLocalTimezone        = Date::factory('now', $website->getTimezone())->toString('Y-m-d');
+        if ($this->site) {
+            $datetimeCreationDate      = $this->site->getCreationDate()->getDatetime();
+            $creationDateLocalTimezone = Date::factory($datetimeCreationDate, $this->site->getTimezone())->toString('Y-m-d');
+            $todayLocalTimezone        = Date::factory('now', $this->site->getTimezone())->toString('Y-m-d');
 
             if ($creationDateLocalTimezone == $todayLocalTimezone) {
                 Piwik::redirectToModule('CoreHome', 'index',
                     array('date'   => 'today',
-                          'idSite' => $websiteId,
+                          'idSite' => $this->idSite,
                           'period' => Common::getRequestVar('period'))
                 );
             }
@@ -206,7 +215,7 @@ class Controller extends \Piwik\Plugin\Controller
     //  --------------------------------------------------------
     //  ROW EVOLUTION
     //  The following methods render the popover that shows the
-    //  evolution of a singe or multiple rows in a data table
+    //  evolution of a single or multiple rows in a data table
     //  --------------------------------------------------------
 
     /** Render the entire row evolution popover for a single row */
@@ -264,6 +273,8 @@ class Controller extends \Piwik\Plugin\Controller
         UpdateCheck::check($force = false, UpdateCheck::UI_CLICK_CHECK_INTERVAL);
 
         $view = new View('@CoreHome/checkForUpdates');
+        $view->isManualUpdateCheck = true;
+        $view->lastUpdateCheckFailed = UpdateCheck::hasLastCheckFailed();
         $this->setGeneralVariablesView($view);
         return $view->render();
     }
@@ -282,8 +293,21 @@ class Controller extends \Piwik\Plugin\Controller
                 unset($parameters[$name]);
             }
         }
+        $paypalParameters = [
+            "cmd" => "_s-xclick"
+        ];
+        if (empty($parameters["onetime"]) || $parameters["onetime"] != "true") {
+            $paypalParameters["hosted_button_id"] = "DVKLY73RS7JTE";
+            $paypalParameters["currency_code"] = "USD";
+            $paypalParameters["on0"] = "Piwik Supporter";
+            if (!empty($parameters["os0"])) {
+                $paypalParameters["os0"] = $parameters["os0"];
+            }
+        } else {
+            $paypalParameters["hosted_button_id"] = "RPL23NJURMTFA";
+        }
 
-        $url = "https://www.paypal.com/cgi-bin/webscr?" . Url::getQueryStringFromParameters($parameters);
+        $url = "https://www.paypal.com/cgi-bin/webscr?" . Url::getQueryStringFromParameters($paypalParameters);
 
         Url::redirectToUrl($url);
         exit;

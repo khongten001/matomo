@@ -10,7 +10,11 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>facebook.com</url>
 		<logo>plugins/Morpheus/icons/dist/socials/facebook.com.png</logo>
+		<segment>referrerType==social;referrerName==Facebook</segment>
+		<Referrers_SocialNetwork>Facebook</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://facebook.com/whatever</Referrers_WebsitePage>
 	</row>
 	<row>
 		<label>Facebook - http://fb.me/?q=sdlfjs&amp;n=slfjsd</label>
@@ -22,7 +26,11 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>facebook.com</url>
 		<logo>plugins/Morpheus/icons/dist/socials/facebook.com.png</logo>
+		<segment>referrerType==social;referrerName==Facebook</segment>
+		<Referrers_SocialNetwork>Facebook</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://fb.me/?q=sdlfjs&amp;n=slfjsd</Referrers_WebsitePage>
 	</row>
 	<row>
 		<label>Facebook - http://www.facebook.com/another/path</label>
@@ -34,7 +42,11 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>facebook.com</url>
 		<logo>plugins/Morpheus/icons/dist/socials/facebook.com.png</logo>
+		<segment>referrerType==social;referrerName==Facebook</segment>
+		<Referrers_SocialNetwork>Facebook</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://www.facebook.com/another/path</Referrers_WebsitePage>
 	</row>
 	<row>
 		<label>Flickr - http://www.flickr.com</label>
@@ -46,7 +58,11 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>flickr.com</url>
 		<logo>plugins/Morpheus/icons/dist/socials/flickr.com.png</logo>
+		<segment>referrerType==social;referrerName==Flickr</segment>
+		<Referrers_SocialNetwork>Flickr</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://www.flickr.com</Referrers_WebsitePage>
 	</row>
 	<row>
 		<label>Mixi - http://mixi.jp</label>
@@ -58,7 +74,11 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>mixi.jp</url>
 		<logo>plugins/Morpheus/icons/dist/socials/mixi.jp.png</logo>
+		<segment>referrerType==social;referrerName==Mixi</segment>
+		<Referrers_SocialNetwork>Mixi</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://mixi.jp</Referrers_WebsitePage>
 	</row>
 	<row>
 		<label>Skyrock - http://skyrock.com</label>
@@ -70,7 +90,11 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>skyrock.com</url>
 		<logo>plugins/Morpheus/icons/dist/socials/skyrock.com.png</logo>
+		<segment>referrerType==social;referrerName==Skyrock</segment>
+		<Referrers_SocialNetwork>Skyrock</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://skyrock.com</Referrers_WebsitePage>
 	</row>
 	<row>
 		<label>Twitter - http://t.co/id/?y=dsfs</label>
@@ -82,7 +106,11 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>twitter.com</url>
 		<logo>plugins/Morpheus/icons/dist/socials/twitter.com.png</logo>
+		<segment>referrerType==social;referrerName==Twitter</segment>
+		<Referrers_SocialNetwork>Twitter</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://t.co/id/?y=dsfs</Referrers_WebsitePage>
 	</row>
 	<row>
 		<label>Twitter - http://twitter.com/whatever2</label>
@@ -94,7 +122,11 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>twitter.com</url>
 		<logo>plugins/Morpheus/icons/dist/socials/twitter.com.png</logo>
+		<segment>referrerType==social;referrerName==Twitter</segment>
+		<Referrers_SocialNetwork>Twitter</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://twitter.com/whatever2</Referrers_WebsitePage>
 	</row>
 	<row>
 		<label>Twitter - http://www.twitter.com/index?a=2334</label>
@@ -106,7 +138,11 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>twitter.com</url>
 		<logo>plugins/Morpheus/icons/dist/socials/twitter.com.png</logo>
+		<segment>referrerType==social;referrerName==Twitter</segment>
+		<Referrers_SocialNetwork>Twitter</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://www.twitter.com/index?a=2334</Referrers_WebsitePage>
 	</row>
 	<row>
 		<label>Xanga - http://xanga.com</label>
@@ -118,6 +154,10 @@
 		<nb_visits_converted>0</nb_visits_converted>
 		<sum_daily_nb_uniq_visitors>1</sum_daily_nb_uniq_visitors>
 		<sum_daily_nb_users>0</sum_daily_nb_users>
+		<url>xanga.com</url>
 		<logo>plugins/Morpheus/icons/dist/socials/xanga.com.png</logo>
+		<segment>referrerType==social;referrerName==Xanga</segment>
+		<Referrers_SocialNetwork>Xanga</Referrers_SocialNetwork>
+		<Referrers_WebsitePage>http://xanga.com</Referrers_WebsitePage>
 	</row>
 </result>

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -15,8 +15,10 @@ use Piwik\DataTable;
 use Piwik\DataTable\Row;
 use Piwik\Metrics as PiwikMetrics;
 use Piwik\Piwik;
+use Piwik\RankingQuery;
 use Piwik\Tracker\Action;
 use Piwik\Tracker\PageUrl;
+use Piwik\Tracker\GoalManager;
 use Zend_Db_Statement;
 
 /**
@@ -37,7 +39,7 @@ class ArchivingHelper
      * @param array $actionsTablesByType
      * @return int
      */
-    public static function updateActionsTableWithRowQuery($query, $fieldQueried, & $actionsTablesByType, $metricsConfig)
+    public static function updateActionsTableWithRowQuery($query, $fieldQueried, $actionsTablesByType, $metricsConfig)
     {
         $rowsProcessed = 0;
         while ($row = $query->fetch()) {
@@ -57,15 +59,20 @@ class ArchivingHelper
                 continue;
             }
 
+            $hasRowName = !empty($row['name']) && $row['name'] != RankingQuery::LABEL_SUMMARY_ROW;
+
             // This will appear as <url /> in the API, which is actually very important to keep
             // eg. When there's at least one row in a report that does not have a URL, not having this <url/> would break HTML/PDF reports.
             $url = '';
+            $pageTitlePath = null;
             if ($row['type'] == Action::TYPE_SITE_SEARCH
                 || $row['type'] == Action::TYPE_PAGE_TITLE
             ) {
                 $url = null;
-            } elseif (!empty($row['name'])
-                        && $row['name'] != DataTable::LABEL_SUMMARY_ROW) {
+                if ($hasRowName) {
+                    $pageTitlePath = $row['name'];
+                }
+            } elseif ($hasRowName) {
                 $url = PageUrl::reconstructNormalizedUrl((string)$row['name'], $row['url_prefix']);
             }
 
@@ -122,6 +129,12 @@ class ArchivingHelper
                 }
             }
 
+            if ($pageTitlePath !== null
+                && !$actionRow->isSummaryRow()
+            ) {
+                $actionRow->setMetadata('page_title_path', $pageTitlePath);
+            }
+
             if ($row['type'] != Action::TYPE_PAGE_URL
                 && $row['type'] != Action::TYPE_PAGE_TITLE
             ) {
@@ -173,6 +186,157 @@ class ArchivingHelper
         // just to make sure php copies the last $actionRow in the $parentTable array
         $actionRow =& $actionsTablesByType;
         return $rowsProcessed;
+    }
+
+    /**
+     * Update the existing action datatable with goal columns
+     *
+     * @param Zend_Db_Statement|PDOStatement $resultSet Result set from the goals data query
+     * @param bool                           $isPages   True if page view goals metrics should be used, else entry goal metrics
+     *
+     * @return int  Number of rows processed
+     * @throws \Exception
+     */
+    public static function updateActionsTableWithGoals($resultSet, bool $isPages): int
+    {
+        $rowsProcessed = 0;
+
+        while ($row = $resultSet->fetch()) {
+            if (self::updateActionsTableRowWithGoals($row, $isPages)) {
+                $rowsProcessed++;
+            }
+        }
+         return $rowsProcessed;
+    }
+
+    /**
+     * Add goals metrics to a single row of the actions table
+     *
+     * @param array $row        The array of goals metric data to add to the action table row
+     * @param bool  $isPages    True if page view goals metrics should be used, else entry goal metrics
+     *
+     * @return bool
+     * @throws \Exception
+     */
+    private static function updateActionsTableRowWithGoals(array $row, bool $isPages): bool
+    {
+
+        if (!isset($row['idaction']) || !isset($row['type'])) {
+            return false;
+        }
+
+        // Match the existing action row in the datatable
+        $actionRow = self::getCachedActionRow($row['idaction'], $row['type']);
+        if ($actionRow === false || is_null($actionRow)) {
+            return false;
+        }
+
+        // Define the possible goal metrics available in the goals data resultset
+        if ($isPages) {
+            // Page view metrics
+            $possibleMetrics = [
+                PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS             => 'nb_conversions',           // 1
+                PiwikMetrics::INDEX_GOAL_REVENUE                    => 'revenue',                  // 2
+                PiwikMetrics::INDEX_GOAL_NB_PAGES_UNIQ_BEFORE       => 'nb_conv_pages_before',     // 9
+                PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ATTRIB      => 'nb_conversions_attrib',    // 10
+                PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_PAGE_RATE   => 'nb_conversions_page_rate', // 11
+                PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_PAGE_UNIQ   => 'nb_conversions_page_uniq', // 12
+                PiwikMetrics::INDEX_GOAL_REVENUE_ATTRIB             => 'revenue_attrib',           // 15
+            ];
+        } else {
+            // Entry page metrics
+            $possibleMetrics = [
+                PiwikMetrics::INDEX_GOAL_REVENUE_ENTRY              => 'revenue_entry',             // 17
+                PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ENTRY_RATE  => 'nb_conversions_entry_rate', // 12
+                PiwikMetrics::INDEX_GOAL_REVENUE_PER_ENTRY          => 'revenue_per_entry',         // 13
+                PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ENTRY       => 'nb_conversions_entry',      // 16
+            ];
+        }
+
+        unset($row['type']);
+        unset($row['idaction']);
+
+        if (!isset($row['idgoal'])) {
+             return false;
+        }
+
+        if ($isPages &&
+            isset($row[PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ATTRIB]) &&
+            isset($row[PiwikMetrics::INDEX_GOAL_NB_PAGES_UNIQ_BEFORE]))
+        {
+            /**
+             * Ensures this metric is available. It will be calculated later using a filter.
+             * @see \Piwik\Plugins\Goals\DataTable\Filter\CalculateConversionPageRate
+             */
+            $row[PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_PAGE_RATE] = 0;
+        }
+
+        if (isset($row[PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ATTRIB])) {
+            $row[PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ATTRIB] = (float) $row[PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ATTRIB];
+        }
+
+        if (isset($row[PiwikMetrics::INDEX_GOAL_REVENUE_ATTRIB])) {
+            $row[PiwikMetrics::INDEX_GOAL_REVENUE_ATTRIB] = (float) $row[PiwikMetrics::INDEX_GOAL_REVENUE_ATTRIB];
+        }
+
+        if (!$isPages) {
+            $nbEntrances = $actionRow->getColumn(PiwikMetrics::INDEX_PAGE_ENTRY_NB_VISITS);
+            $conversions = $row[PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ENTRY];
+            if ($nbEntrances !== false && is_numeric($nbEntrances) && $nbEntrances > 0) {
+
+                // Calculate conversion entry rate
+                if (isset($row[PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ENTRY])) {
+                    $row[PiwikMetrics::INDEX_GOAL_NB_CONVERSIONS_ENTRY_RATE] = Piwik::getQuotientSafe(
+                        $conversions,
+                        $nbEntrances,
+                        GoalManager::REVENUE_PRECISION + 1);
+                }
+
+                // Calculate revenue per entry
+                if (isset($row[PiwikMetrics::INDEX_GOAL_REVENUE_ENTRY])) {
+                    $row[PiwikMetrics::INDEX_GOAL_REVENUE_PER_ENTRY] = (float) Piwik::getQuotientSafe(
+                        $row[PiwikMetrics::INDEX_GOAL_REVENUE_ENTRY],
+                        $nbEntrances,
+                        GoalManager::REVENUE_PRECISION + 1);
+
+                    $row[PiwikMetrics::INDEX_GOAL_REVENUE_ENTRY] = (float) $row[PiwikMetrics::INDEX_GOAL_REVENUE_ENTRY];
+                }
+            }
+        }
+
+        // Get goals column
+        $goalsColumn = $actionRow->getColumn(PiwikMetrics::INDEX_GOALS);
+        if ($goalsColumn === false) {
+            $goalsColumn = [];
+        }
+
+        // Create goal subarray if not exists
+        if (!isset($goalsColumn[$row['idgoal']])) {
+            $goalsColumn[$row['idgoal']] = [];
+        }
+
+        // Find metric columns in the goal query row and add them to the actions data table row
+        foreach ($possibleMetrics as $metricKey => $columnName) {
+            if (isset($row[$metricKey])) {
+
+                // Add metric
+                if (!isset($goalsColumn[$row['idgoal']][$metricKey])) {
+                    $goalsColumn[$row['idgoal']][$metricKey] = $row[$metricKey];
+                } else {
+                    if ($metricKey == PiwikMetrics::INDEX_GOAL_NB_PAGES_UNIQ_BEFORE) {
+                        if ($goalsColumn[$row['idgoal']][$metricKey] < $row[$metricKey]) {
+                            $goalsColumn[$row['idgoal']][$metricKey] = $row[$metricKey];
+                        }
+                    } else {
+                        $goalsColumn[$row['idgoal']][$metricKey] += $row[$metricKey];
+                    }
+                }
+
+                // Write goals column back to datatable
+                $actionRow->setColumn(PiwikMetrics::INDEX_GOALS, $goalsColumn);
+            }
+        }
+        return true;
     }
 
     public static function removeEmptyColumns($dataTable)
@@ -257,7 +421,6 @@ class ArchivingHelper
             $limit = 100000;
         }
         return $limit;
-
     }
 
     /**
@@ -296,6 +459,7 @@ class ArchivingHelper
 
     public static $maximumRowsInDataTableLevelZero;
     public static $maximumRowsInSubDataTable;
+    public static $maximumRowsInDataTableSiteSearch;
     public static $columnToSortByBeforeTruncation;
 
     protected static $actionUrlCategoryDelimiter = null;
@@ -319,6 +483,7 @@ class ArchivingHelper
         self::$columnToSortByBeforeTruncation = PiwikMetrics::INDEX_NB_VISITS;
         self::$maximumRowsInDataTableLevelZero = Config::getInstance()->General['datatable_archiving_maximum_rows_actions'];
         self::$maximumRowsInSubDataTable = Config::getInstance()->General['datatable_archiving_maximum_rows_subtable_actions'];
+        self::$maximumRowsInDataTableSiteSearch = Config::getInstance()->General['datatable_archiving_maximum_rows_site_search'];
 
         DataTable::setMaximumDepthLevelAllowedAtLeast(self::getSubCategoryLevelLimit() + 1);
     }
@@ -355,20 +520,20 @@ class ArchivingHelper
      * @param int $actionType
      * @param int $urlPrefix
      * @param array $actionsTablesByType
-     * @return DataTable
+     * @return DataTable\Row
      */
-    public static function getActionRow($actionName, $actionType, $urlPrefix = null, &$actionsTablesByType)
+    public static function getActionRow($actionName, $actionType, $urlPrefix, $actionsTablesByType)
     {
         // we work on the root table of the given TYPE (either ACTION_URL or DOWNLOAD or OUTLINK etc.)
         /* @var DataTable $currentTable */
-        $currentTable =& $actionsTablesByType[$actionType];
+        $currentTable = $actionsTablesByType[$actionType];
 
         if (is_null($currentTable)) {
             throw new \Exception("Action table for type '$actionType' was not found during Actions archiving.");
         }
 
         // check for ranking query cut-off
-        if ($actionName == DataTable::LABEL_SUMMARY_ROW) {
+        if ($actionName == RankingQuery::LABEL_SUMMARY_ROW) {
             $summaryRow = $currentTable->getRowFromId(DataTable::ID_SUMMARY_ROW);
             if ($summaryRow === false) {
                 $summaryRow = $currentTable->addSummaryRow(self::createSummaryRow());
@@ -443,12 +608,20 @@ class ArchivingHelper
 
         $name = str_replace("\n", "", $name);
 
+        if ($type == Action::TYPE_PAGE_TITLE && self::$actionTitleCategoryDelimiter === '') {
+            if ($name === '' || $name === false || $name === null || trim($name) === '') {
+                $name = self::getUnknownActionName($type);
+            }
+            return array(' ' . trim($name));
+        }
+
         $name = self::parseNameFromPageUrl($name, $type, $urlPrefix);
 
         // outlinks and downloads
-        if(is_array($name)) {
+        if (is_array($name)) {
             return $name;
         }
+
         $split = self::splitNameByDelimiter($name, $type);
 
         if (empty($split)) {
@@ -478,7 +651,7 @@ class ArchivingHelper
      */
     private static function getCachedActionRowKey($idAction, $actionType)
     {
-        return $idAction == DataTable::LABEL_SUMMARY_ROW
+        return $idAction == RankingQuery::LABEL_SUMMARY_ROW
             ? $actionType . '_others'
             : $idAction;
     }
@@ -520,7 +693,7 @@ class ArchivingHelper
      *
      * @param int $idAction
      * @param int $actionType
-     * @param \DataTable\Row
+     * @param \Piwik\DataTable\Row
      */
     private static function setCachedActionRow($idAction, $actionType, $actionRow)
     {
@@ -548,10 +721,12 @@ class ArchivingHelper
      */
     private static function createSummaryRow()
     {
-        return new Row(array(
+        $summaryRow = new Row(array(
                             Row::COLUMNS =>
                                 array('label' => DataTable::LABEL_SUMMARY_ROW) + self::getDefaultRowColumns()
                        ));
+        $summaryRow->setIsSummaryRow(); // this should be set in DataTable::addSummaryRow(), but we set it here as well to be safe
+        return $summaryRow;
     }
 
     private static function splitNameByDelimiter($name, $type)
@@ -622,5 +797,24 @@ class ArchivingHelper
         }
 
         return $name;
+    }
+
+    public static function setFolderPathMetadata(DataTable $dataTable, $isUrl, $prefix = '')
+    {
+        $configGeneral = Config::getInstance()->General;
+        $separator = $isUrl ? '/' : $configGeneral['action_title_category_delimiter'];
+        $metadataName = $isUrl ? 'folder_url_start' : 'page_title_path';
+
+        foreach ($dataTable->getRows() as $row) {
+            $subtable = $row->getSubtable();
+            if (!$subtable) {
+                continue;
+            }
+
+            $metadataValue = $prefix . $row->getColumn('label');
+            $row->setMetadata($metadataName, $metadataValue);
+
+            self::setFolderPathMetadata($subtable, $isUrl, $metadataValue . $separator);
+        }
     }
 }

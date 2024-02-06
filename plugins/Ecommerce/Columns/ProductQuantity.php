@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -17,5 +17,4 @@ class ProductQuantity extends Dimension
     protected $columnName = 'quantity';
     protected $nameSingular = 'Goals_ProductQuantity';
     protected $category = 'Goals_Ecommerce';
-
 }

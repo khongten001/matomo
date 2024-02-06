@@ -1,12 +1,12 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
-namespace Piwik\Plugins\Widgetize\tests\Integration;
+namespace Piwik\Plugins\Widgetize\tests\System;
 
 use Piwik\Container\StaticContainer;
 use Piwik\Http\ControllerResolver;
@@ -28,7 +28,7 @@ class WidgetTest extends SystemTestCase
      */
     public static $fixture = null; // initialized below class definition
 
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -38,7 +38,7 @@ class WidgetTest extends SystemTestCase
         $_GET['date']   = '2013-01-23';
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         $_GET = array();
         parent::tearDown();
@@ -148,12 +148,12 @@ class WidgetTest extends SystemTestCase
                         'action' => 'myExampleWidget',
                     ),
             ),array (
-                'name' => 'Top Keywords for Page URL',
-                'uniqueId' => 'widgetReferrersgetKeywordsForPage',
+                'name' => 'Campaign URL Builder',
+                'uniqueId' => 'widgetReferrersgetCampaignUrlBuilder',
                 'parameters' =>
                     array (
                         'module' => 'Referrers',
-                        'action' => 'getKeywordsForPage',
+                        'action' => 'getCampaignUrlBuilder',
                     ),
             ),array (
                 'name' => 'Ecommerce Log',
@@ -273,14 +273,6 @@ class WidgetTest extends SystemTestCase
                         'module' => 'Live',
                         'action' => 'getLastVisitsDetails',
                         'small' => 1,
-                    ),
-            ),array (
-                'name' => 'Custom Variables',
-                'uniqueId' => 'widgetCustomVariablesgetCustomVariables',
-                'parameters' =>
-                    array (
-                        'module' => 'CustomVariables',
-                        'action' => 'getCustomVariables',
                     ),
             ),array (
                 'name' => 'Device type',
@@ -1008,6 +1000,14 @@ class WidgetTest extends SystemTestCase
                         'action' => 'getSystemCheck',
                     ),
             ), array (
+                'name' => 'Tracking failures',
+                'uniqueId' => 'widgetCoreAdminHomegetTrackingFailures',
+                'parameters' =>
+                    array (
+                        'module' => 'CoreAdminHome',
+                        'action' => 'getTrackingFailures',
+                    ),
+            ), array (
                 'name' => 'System Summary',
                 'uniqueId' => 'widgetCoreHomegetSystemSummary',
                 'parameters' =>
@@ -1310,15 +1310,6 @@ class WidgetTest extends SystemTestCase
                         array (
                             'module' => 'Insights',
                             'action' => 'getOverallMoversAndShakers',
-                        ),
-                ),
-                array (
-                    'name' => 'Top Keywords for Page URL',
-                    'uniqueId' => 'widgetReferrersgetKeywordsForPage',
-                    'parameters' =>
-                        array (
-                            'module' => 'Referrers',
-                            'action' => 'getKeywordsForPage',
                         ),
                 ),
                 array (

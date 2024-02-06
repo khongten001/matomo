@@ -1,20 +1,19 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Integration\Archive;
 
-use Piwik\Archive;
-use Piwik\ArchiveProcessor;
 use Piwik\DataTable;
 use Piwik\DataTable\Row;
-use Piwik\Db;
 use Piwik\Period;
+use Piwik\Plugins\SegmentEditor\API;
 use Piwik\Segment;
+use Piwik\Site;
 use Piwik\Tests\Framework\Fixture;
 use Piwik\Tests\Framework\Mock\FakeAccess;
 use Piwik\Tests\Framework\TestCase\IntegrationTestCase;
@@ -41,7 +40,7 @@ class DataTableFactoryTest extends IntegrationTestCase
         'nb_visits' => 97
     );
 
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -51,6 +50,22 @@ class DataTableFactoryTest extends IntegrationTestCase
         for ($i = 0; $i < $this->site2; $i++) {
             Fixture::createWebsite('2015-01-01 00:00:00');
         }
+
+        API::getInstance()->add('TEST SEGMENT', 'browserCode==ff');
+    }
+
+    public function test_getSiteIdFromMetadata_no_site()
+    {
+        $siteid = DataTableFactory::getSiteIdFromMetadata(new DataTable());
+        $this->assertNull($siteid);
+    }
+
+    public function test_getSiteIdFromMetadata()
+    {
+        $table = new DataTable();
+        $table->setMetadata('site', new Site($this->site1));
+        $siteid = DataTableFactory::getSiteIdFromMetadata($table);
+        $this->assertEquals($this->site1, $siteid);
     }
 
     public function test_makeMerged_numeric_noIndices_shouldContainDefaultRow_IfNoDataGiven()
@@ -264,16 +279,15 @@ class DataTableFactoryTest extends IntegrationTestCase
         $this->assertRowEquals($row3, $this->site2, $map->getTable($this->date2)->getRowFromId(1));
     }
 
-    /**
-     * @expectedException \Exception
-     * @expectedExceptionMessage supposed to work with non-numeric data types but it is not tested
-     */
     public function test_makeMerged_shouldThrowAnException_IfANonNumericDataTypeIsGiven()
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('supposed to work with non-numeric data types but it is not tested');
+
         $dataType  = 'blob';
         $dataNames = array('nb_visits');
 
-        $factory = new DataTableFactory($dataNames, $dataType, array($this->site1), $periods = array(), $this->defaultRow);
+        $factory = new DataTableFactory($dataNames, $dataType, array($this->site1), $periods = array(), new Segment('browserCode==ff', []), $this->defaultRow);
         $factory->makeMerged(array(), array());
     }
 
@@ -284,6 +298,12 @@ class DataTableFactoryTest extends IntegrationTestCase
         $this->assertFalse($dataTable->getMetadata(DataTableFactory::TABLE_METADATA_SITE_INDEX));
         $this->assertTrue($period instanceof Period);
         $this->assertSame($expectedPeriod, $period->toString());
+
+        $segment = $dataTable->getMetadata(DataTableFactory::TABLE_METADATA_SEGMENT_INDEX);
+        $this->assertEquals('browserCode==ff', $segment);
+
+        $segmentPretty = $dataTable->getMetadata(DataTableFactory::TABLE_METADATA_SEGMENT_PRETTY_INDEX);
+        $this->assertEquals('TEST SEGMENT', $segmentPretty);
     }
 
     private function assertRowCountEquals($expectedCount, $tableOrMap)
@@ -333,7 +353,7 @@ class DataTableFactoryTest extends IntegrationTestCase
             $siteIds = array($siteIds[0]);
         }
 
-        return new DataTableFactory($dataNames, $dataType, $siteIds, $periods, $defaultRow);
+        return new DataTableFactory($dataNames, $dataType, $siteIds, $periods, new Segment('browserCode==ff', []), $defaultRow);
     }
 
     private function getResultIndices($periodIndex = false, $siteIndex = false)

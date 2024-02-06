@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -15,6 +15,8 @@ use Piwik\Container\StaticContainer;
 use Piwik\DataTable;
 use Piwik\DataTable\Filter\PivotByDimension;
 use Piwik\Metrics;
+use Piwik\Period\PeriodValidator;
+use Piwik\Piwik;
 use Piwik\Plugins\API\API;
 use Piwik\Plugin\ReportsProvider;
 
@@ -83,7 +85,7 @@ use Piwik\Plugin\ReportsProvider;
  *
  * @api
  */
-class   Config
+class Config
 {
     /**
      * The list of ViewDataTable properties that are 'Client Side Properties'.
@@ -94,10 +96,11 @@ class   Config
         'pivot_by_column',
         'pivot_dimension_name',
         'disable_all_rows_filter_limit',
+        'segmented_visitor_log_segment_suffix',
     );
 
     /**
-     * The list of ViewDataTable properties that can be overriden by query parameters.
+     * The list of ViewDataTable properties that can be overridden by query parameters.
      */
     public $overridableProperties = array(
         'show_goals',
@@ -106,6 +109,7 @@ class   Config
         'show_pivot_by_subtable',
         'show_table',
         'show_table_all_columns',
+        'show_table_performance',
         'show_footer',
         'show_footer_icons',
         'show_all_views_icons',
@@ -124,7 +128,9 @@ class   Config
         'show_pagination_control',
         'show_offset_information',
         'hide_annotations_view',
-        'columns_to_display'
+        'columns_to_display',
+        'rows_to_display',
+        'segmented_visitor_log_segment_suffix',
     );
 
     /**
@@ -229,6 +235,11 @@ class   Config
     public $show_table_all_columns = true;
 
     /**
+     * Controls whether the 'Performance columns' footer icon is shown (if available).
+     */
+    public $show_table_performance = true;
+
+    /**
      * Controls whether the entire view footer is shown.
      */
     public $show_footer = true;
@@ -254,6 +265,13 @@ class   Config
      * Controls whether graph and non core viewDataTable footer icons are shown or not.
      */
     public $show_all_views_icons = true;
+
+    /**
+     * Array property that contains the names of columns that can be selected in the Series Picker.
+     *
+     * Default value: false
+     */
+    public $selectable_columns = false;
 
     /**
      * Related reports are listed below a datatable view. When clicked, the original report will
@@ -300,6 +318,12 @@ class   Config
     public $documentation = false;
 
     /**
+     * URL linking to an online guide for this report (or plugin).
+     * @var string
+     */
+    public $onlineGuideUrl = false;
+
+    /**
      * Array property containing custom data to be saved in JSON in the data-params HTML attribute
      * of a data table div. This data can be used by JavaScript DataTable classes.
      *
@@ -321,6 +345,16 @@ class   Config
      * Controls whether the search box under the datatable is shown.
      */
     public $show_search = true;
+
+    /**
+     * Controls whether the period selector under the datatable is shown.
+     */
+    public $show_periods = false;
+
+    /**
+     * Controls which periods can be selected when the period selector is enabled
+     */
+    public $selectable_periods = [];
 
     /**
      * Controls whether the export feature under the datatable is shown.
@@ -351,7 +385,7 @@ class   Config
 
     /**
      * If enabled, shows the visualization as a content block. This is similar to wrapping your visualization
-     * with a `<div piwik-content-block></div>`
+     * with a `<ContentBlock/>`
      * @var bool
      */
     public $show_as_content_block = true;
@@ -481,6 +515,12 @@ class   Config
     public $disable_all_rows_filter_limit = false;
 
     /**
+     * Sets a limit for the maximum number of rows that can be exported.
+     * @var int
+     */
+    public $max_export_filter_limit = -1;
+
+    /**
      * Message to show if not data is available for the report
      * Defaults to `CoreHome_ThereIsNoDataForThisReport` if not set
      *
@@ -489,6 +529,35 @@ class   Config
      * @var string
      */
     public $no_data_message = '';
+
+    /**
+     * List of extra actions to display as icons in the datatable footer.
+     *
+     * Not API yet.
+     *
+     * @var array
+     * @ignore
+     */
+    public $datatable_actions = [];
+
+    /*
+     * Can be used to add a segment condition to the segment used to launch the segmented visitor log.
+     * This can be useful if you'd like to have this segment condition applied ONLY to the segmented visitor
+     * log, and not to the report itself.
+     *
+     * Contrast with just setting the 'segment', if done this way, the segment will be applied to the report
+     * data as well, which may not be desired.
+     *
+     * @var string
+     */
+    public $segmented_visitor_log_segment_suffix = '';
+
+    /**
+     * Disable comparison support for this specific usage of a ViewDataTable.
+     *
+     * @var bool
+     */
+    public $disable_comparison = false;
 
     /**
      * @ignore
@@ -515,6 +584,12 @@ class   Config
             Metrics::getDefaultProcessedMetrics()
         );
 
+        $periodValidator = new PeriodValidator();
+        $this->selectable_periods = $periodValidator->getPeriodsAllowedForUI();
+        $this->selectable_periods = array_diff($this->selectable_periods, array('range'));
+        foreach ($this->selectable_periods as $period) {
+            $this->translations[$period] = ucfirst(Piwik::translate('Intl_Period' . ucfirst($period)));
+        }
         $this->show_title = (bool)Common::getRequestVar('showtitle', 0, 'int');
     }
 
@@ -566,6 +641,10 @@ class   Config
 
         if (isset($report['documentation'])) {
             $this->documentation = $report['documentation'];
+        }
+
+        if (isset($report['onlineGuideUrl'])) {
+            $this->onlineGuideUrl = $report['onlineGuideUrl'];
         }
     }
 
@@ -686,7 +765,7 @@ class   Config
      *
      * @param string $relatedReport The plugin and method of the report, eg, `'DevicesDetection.getBrowsers'`.
      * @param string $title The report's display name, eg, `'Browsers'`.
-     * @param array $queryParams Any extra query parameters to set in releated report's URL, eg,
+     * @param array $queryParams Any extra query parameters to set in related report's URL, eg,
      *                           `array('idGoal' => 'ecommerceOrder')`.
      */
     public function addRelatedReport($relatedReport, $title, $queryParams = array())
@@ -694,8 +773,8 @@ class   Config
         list($module, $action) = explode('.', $relatedReport);
 
         // don't add the related report if it references this report
-        if ($this->controllerName == $module
-            && $this->controllerAction == $action) {
+        if ($this->controllerName === $module
+            && $this->controllerAction === $action) {
             if (empty($queryParams)) {
                 return;
             }

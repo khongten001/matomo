@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -198,9 +198,16 @@ class API extends \Piwik\Plugin\API
      * @throws \Exception In case a report having the given ID does not exist
      * @throws \Exception In case the report exists but does not return a dataTable
      */
-    public function getMoversAndShakers($idSite, $period, $date, $reportUniqueId, $segment = false,
-                                        $comparedToXPeriods = 1, $limitIncreaser = 4, $limitDecreaser = 4)
-    {
+    public function getMoversAndShakers(
+        $idSite,
+        $period,
+        $date,
+        $reportUniqueId,
+        $segment = false,
+        $comparedToXPeriods = 1,
+        $limitIncreaser = 4,
+        $limitDecreaser = 4
+    ) {
         Piwik::checkUserHasViewAccess(array($idSite));
 
         $metric  = 'nb_visits';
@@ -252,10 +259,19 @@ class API extends \Piwik\Plugin\API
      * @throws \Exception In case the report exists but does not return a dataTable
      */
     public function getInsights(
-        $idSite, $period, $date, $reportUniqueId, $segment = false, $limitIncreaser = 5, $limitDecreaser = 5,
-        $filterBy = '', $minImpactPercent = 2, $minGrowthPercent = 20,
-        $comparedToXPeriods = 1, $orderBy = 'absolute')
-    {
+        $idSite,
+        $period,
+        $date,
+        $reportUniqueId,
+        $segment = false,
+        $limitIncreaser = 5,
+        $limitDecreaser = 5,
+        $filterBy = '',
+        $minImpactPercent = 2,
+        $minGrowthPercent = 20,
+        $comparedToXPeriods = 1,
+        $orderBy = 'absolute'
+    ) {
         Piwik::checkUserHasViewAccess(array($idSite));
 
         $metric = 'nb_visits';
@@ -317,12 +333,12 @@ class API extends \Piwik\Plugin\API
     private function requestApiMethod($method, $idSite, $period, $date, $reportId, $segment, $additionalParams)
     {
         $params = array(
-            'method' => 'Insights.' . $method,
             'idSite' => $idSite,
             'date'   => $date,
             'period' => $period,
             'format' => 'original',
             'reportUniqueId' => $reportId,
+            'totals' => 0,
         );
 
         if (!empty($segment)) {
@@ -335,8 +351,6 @@ class API extends \Piwik\Plugin\API
             }
         }
 
-        $request = new ApiRequest($params);
-        return $request->process();
+        return ApiRequest::processRequest('Insights.' . $method, $params, $default = []);
     }
-
 }

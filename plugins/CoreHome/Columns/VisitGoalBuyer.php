@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,7 +11,6 @@ namespace Piwik\Plugins\CoreHome\Columns;
 use Piwik\Metrics\Formatter;
 use Piwik\Piwik;
 use Piwik\Plugin\Dimension\VisitDimension;
-use Piwik\Plugins\CoreHome\Segment;
 use Piwik\Tracker\Action;
 use Piwik\Tracker\GoalManager;
 use Piwik\Tracker\Request;
@@ -47,7 +46,7 @@ class VisitGoalBuyer extends VisitDimension
     public function formatValue($value, $idSite, Formatter $formatter)
     {
         switch ($value) {
-            case 'none';
+            case 'none':
             case '0':
             case self::TYPE_BUYER_NONE:
                 return Piwik::translate('UserCountryMap_None');
@@ -139,5 +138,4 @@ class VisitGoalBuyer extends VisitDimension
 
         return self::TYPE_BUYER_OPEN_CART;
     }
-
 }

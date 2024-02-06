@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -20,6 +20,8 @@ use Piwik\Tracker;
  */
 class ActionEvent extends Action
 {
+    protected $eventValue;
+
     public function __construct(Request $request)
     {
         parent::__construct(Action::TYPE_EVENT, $request);
@@ -27,7 +29,7 @@ class ActionEvent extends Action
         $url = $request->getParam('url');
 
         $this->setActionUrl($url);
-        $this->eventValue = trim($request->getParam('e_v'));
+        $this->eventValue = self::getEventValue($request);
     }
 
     public static function shouldHandle(Request $request)
@@ -36,6 +38,11 @@ class ActionEvent extends Action
         $eventAction   = $request->getParam('e_a');
 
         return (strlen($eventCategory) > 0 && strlen($eventAction) > 0);
+    }
+
+    public static function getEventValue(Request $request)
+    {
+        return trim($request->getParam('e_v'));
     }
 
     public function getEventAction()

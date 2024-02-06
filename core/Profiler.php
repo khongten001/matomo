@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -100,12 +100,18 @@ class Profiler
 
     private static function maxSumMsFirst($a, $b)
     {
-        return $a['sum_time_ms'] < $b['sum_time_ms'];
+        if ($a['sum_time_ms'] == $b['sum_time_ms']) {
+            return 0;
+        }
+        return ($a['sum_time_ms'] < $b['sum_time_ms']) ? -1 : 1;
     }
 
     private static function sortTimeDesc($a, $b)
     {
-        return $a['sumTimeMs'] < $b['sumTimeMs'];
+        if ($a['sumTimeMs'] == $b['sumTimeMs']) {
+            return 0;
+        }
+        return ($a['sumTimeMs'] < $b['sumTimeMs']) ? -1 : 1;
     }
 
     /**
@@ -209,12 +215,19 @@ class Profiler
             return;
         }
 
-        if (!function_exists('xhprof_enable')) {
-            $xhProfPath = PIWIK_INCLUDE_PATH . '/vendor/facebook/xhprof/extension/modules/xhprof.so';
+        $hasXhprof = function_exists('xhprof_enable');
+        $hasTidewaysXhprof = function_exists('tideways_xhprof_enable') || function_exists('tideways_enable');
+
+        if (!$hasXhprof && !$hasTidewaysXhprof) {
+            $xhProfPath = PIWIK_INCLUDE_PATH . '/vendor/lox/xhprof/extension/modules/xhprof.so';
             throw new Exception("Cannot find xhprof_enable, make sure to 1) install xhprof: run 'composer install --dev' and build the extension, and 2) add 'extension=$xhProfPath' to your php.ini.");
         }
 
         $outputDir = ini_get("xhprof.output_dir");
+        if (!$outputDir && $hasTidewaysXhprof) {
+            $outputDir = sys_get_temp_dir();
+        }
+
         if (empty($outputDir)) {
             throw new Exception("The profiler output dir is not set. Add 'xhprof.output_dir=...' to your php.ini.");
         }
@@ -239,12 +252,42 @@ class Profiler
             self::setProfilingRunIds(array());
         }
 
-        xhprof_enable(XHPROF_FLAGS_CPU + XHPROF_FLAGS_MEMORY);
+        if (function_exists('xhprof_enable')) {
+            xhprof_enable(XHPROF_FLAGS_CPU + XHPROF_FLAGS_MEMORY);
+        } elseif (function_exists('tideways_enable')) {
+            tideways_enable(TIDEWAYS_FLAGS_MEMORY | TIDEWAYS_FLAGS_CPU);
+        } elseif (function_exists('tideways_xhprof_enable')) {
+            tideways_xhprof_enable(TIDEWAYS_XHPROF_FLAGS_MEMORY | TIDEWAYS_XHPROF_FLAGS_CPU);
+        }
 
-        register_shutdown_function(function () use ($profilerNamespace, $mainRun) {
-            $xhprofData = xhprof_disable();
-            $xhprofRuns = new XHProfRuns_Default();
-            $runId = $xhprofRuns->save_run($xhprofData, $profilerNamespace);
+        register_shutdown_function(function () use ($profilerNamespace, $mainRun, $outputDir) {
+            if (function_exists('xhprof_disable')) {
+                $xhprofData = xhprof_disable();
+                $xhprofRuns = new XHProfRuns_Default();
+                $runId = $xhprofRuns->save_run($xhprofData, $profilerNamespace);
+            } elseif (function_exists('tideways_xhprof_disable') || function_exists('tideways_disable')) {
+                if (function_exists('tideways_xhprof_disable')) {
+                    $xhprofData = tideways_xhprof_disable();
+                } else {
+                    $xhprofData = tideways_disable();
+                }
+                $runId = uniqid();
+                file_put_contents(
+                    $outputDir . DIRECTORY_SEPARATOR . $runId . '.' . $profilerNamespace . '.xhprof',
+                    serialize($xhprofData)
+                );
+                $meta = array('time' => time(), 'instance' => SettingsPiwik::getPiwikInstanceId());
+                if (!empty($_GET)) {
+                    $meta['get'] = $_GET;
+                }
+                if (!empty($_POST)) {
+                    $meta['post'] = $_POST;
+                }
+                file_put_contents(
+                    $outputDir . DIRECTORY_SEPARATOR . $runId . '.' . $profilerNamespace . '.meta',
+                    serialize($meta)
+                );
+            }
 
             if (empty($runId)) {
                 die('could not write profiler run');
@@ -257,13 +300,15 @@ class Profiler
                 Profiler::aggregateXhprofRuns($runs, $profilerNamespace, $saveTo = $runId);
 
                 $baseUrlStored = SettingsPiwik::getPiwikUrl();
+                $host = Url::getHost();
 
                 $out = "\n\n";
-                $baseUrl = "http://" . @$_SERVER['HTTP_HOST'] . "/" . @$_SERVER['REQUEST_URI'];
+                $baseUrl = "http://" . $host . "/" . @$_SERVER['REQUEST_URI'];
                 if (strlen($baseUrlStored) > strlen($baseUrl)) {
                     $baseUrl = $baseUrlStored;
                 }
-                $baseUrl = $baseUrlStored . "vendor/facebook/xhprof/xhprof_html/?source=$profilerNamespace&run=$runId";
+                $baseUrl = $baseUrlStored . "vendor/lox/xhprof/xhprof_html/?source=$profilerNamespace&run=$runId";
+                $baseUrl = Common::sanitizeInputValue($baseUrl);
 
                 $out .= "Profiler report is available at:\n";
                 $out .= "<a href='$baseUrl'>$baseUrl</a>";

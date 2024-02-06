@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Plugins\Diagnostics\Diagnostic;
@@ -60,6 +60,7 @@ class RecommendedExtensionsCheck implements Diagnostic
             'libxml',
             'dom',
             'SimpleXML',
+            'openssl'
         );
     }
 
@@ -70,6 +71,7 @@ class RecommendedExtensionsCheck implements Diagnostic
             'libxml'    => 'Installation_SystemCheckWarnLibXmlHelp',
             'dom'       => 'Installation_SystemCheckWarnDomHelp',
             'SimpleXML' => 'Installation_SystemCheckWarnSimpleXMLHelp',
+            'openssl'   => 'Installation_SystemCheckWarnOpensslHelp'
         );
 
         return $this->translator->translate($messages[$missingExtension]);

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -17,6 +17,8 @@ use Piwik\Segment\SegmentExpression;
 
 class LogQueryBuilder
 {
+    const FORCE_INNER_GROUP_BY_NO_SUBSELECT = '__##nosubquery##__';
+
     /**
      * @var LogTablesProvider
      */
@@ -42,9 +44,21 @@ class LogQueryBuilder
         $this->forcedInnerGroupBy = $innerGroupBy;
     }
 
-    public function getSelectQueryString(SegmentExpression $segmentExpression, $select, $from, $where, $bind, $groupBy,
-                                         $orderBy, $limitAndOffset)
+    public function getForcedInnerGroupBySubselect()
     {
+        return $this->forcedInnerGroupBy;
+    }
+
+    public function getSelectQueryString(
+        SegmentExpression $segmentExpression,
+        $select,
+        $from,
+        $where,
+        $bind,
+        $groupBy,
+        $orderBy,
+        $limitAndOffset
+    ) {
         if (!is_array($from)) {
             $from = array($from);
         }
@@ -71,7 +85,11 @@ class LogQueryBuilder
             && strpos($from, 'log_link_visit_action') !== false);
 
         if (!empty($this->forcedInnerGroupBy)) {
-            $sql = $this->buildWrappedSelectQuery($select, $from, $where, $groupBy, $orderBy, $limitAndOffset, $tables, $this->forcedInnerGroupBy);
+            if ($this->forcedInnerGroupBy === self::FORCE_INNER_GROUP_BY_NO_SUBSELECT) {
+                $sql = $this->buildSelectQuery($select, $from, $where, $groupBy, $orderBy, $limitAndOffset);
+            } else {
+                $sql = $this->buildWrappedSelectQuery($select, $from, $where, $groupBy, $orderBy, $limitAndOffset, $tables, $this->forcedInnerGroupBy);
+            }
         } elseif ($useSpecialConversionGroupBy) {
             $innerGroupBy = "CONCAT(log_conversion.idvisit, '_' , log_conversion.idgoal, '_', log_conversion.buster)";
             $sql = $this->buildWrappedSelectQuery($select, $from, $where, $groupBy, $orderBy, $limitAndOffset, $tables, $innerGroupBy);
@@ -89,7 +107,7 @@ class LogQueryBuilder
     private function getKnownTables()
     {
         $names = array();
-        foreach ($this->logTableProvider->getAllLogTables() as $logTable) {
+        foreach ($this->logTableProvider->getAllLogTablesWithTemporary() as $logTable) {
             $names[] = $logTable->getName();
         }
         return $names;
@@ -122,7 +140,7 @@ class LogQueryBuilder
         }
 
         $matchTables = '(' . implode('|', $matchTables) . ')';
-        preg_match_all("/". $matchTables ."\.[a-z0-9_\*]+/", $select, $matches);
+        preg_match_all("/" . $matchTables . "\.[a-z0-9_\*]+/", $select, $matches);
         $neededFields = array_unique($matches[0]);
 
         if (count($neededFields) == 0) {
@@ -154,7 +172,7 @@ class LogQueryBuilder
             }
         }
 
-        preg_match_all("/". $matchTables . "/", $from, $matchesFrom);
+        preg_match_all("/" . $matchTables . "/", $from, $matchesFrom);
 
         $innerSelect = implode(", \n", $neededFields);
         $innerFrom = $from;
@@ -193,15 +211,15 @@ class LogQueryBuilder
 
         $innerQuery = $this->buildSelectQuery($innerSelect, $innerFrom, $innerWhere, $innerGroupBy, $innerOrderBy, $innerLimitAndOffset);
 
-        $select = preg_replace('/'.$matchTables.'\./', 'log_inner.', $select);
+        $select = preg_replace('/' . $matchTables . '\./', 'log_inner.', $select);
 
         $from = "
         (
             $innerQuery
         ) AS log_inner";
         $where = false;
-        $orderBy = preg_replace('/'.$matchTables.'\./', 'log_inner.', $orderBy);
-        $groupBy = preg_replace('/'.$matchTables.'\./', 'log_inner.', $groupBy);
+        $orderBy = preg_replace('/' . $matchTables . '\./', 'log_inner.', $orderBy);
+        $groupBy = preg_replace('/' . $matchTables . '\./', 'log_inner.', $groupBy);
 
         $outerLimitAndOffset = null;
         $query = $this->buildSelectQuery($select, $from, $where, $groupBy, $orderBy, $outerLimitAndOffset);

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -116,7 +116,6 @@ class Updates_1_8_3_b1 extends Updates
             }
 
             $updater->executeMigration(__FILE__, $this->migration->db->dropTable('pdf'));
-
         } catch (\Exception $e) {
         }
     }

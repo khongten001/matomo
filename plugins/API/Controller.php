@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -14,7 +14,7 @@ use Piwik\API\Request;
 use Piwik\Common;
 use Piwik\Config;
 use Piwik\Piwik;
-use Piwik\Plugin\Report;
+use Piwik\Plugins\API\Renderer\Original;
 use Piwik\Url;
 use Piwik\UrlHelper;
 use Piwik\View;
@@ -26,7 +26,11 @@ class Controller extends \Piwik\Plugin\Controller
 {
     function index()
     {
-        $token = 'token_auth=' . Common::getRequestVar('token_auth', 'anonymous', 'string');
+        $tokenAuth = Common::getRequestVar('token_auth', 'anonymous', 'string');
+        $format = Common::getRequestVar('format', false);
+        $serialize = Common::getRequestVar('serialize', false);
+
+        $token = 'token_auth=' . $tokenAuth;
 
         // when calling the API through http, we limit the number of returned results
         if (!isset($_GET['filter_limit'])) {
@@ -41,6 +45,12 @@ class Controller extends \Piwik\Plugin\Controller
         $response = $request->process();
 
         if (is_array($response)) {
+            if ($format == 'original'
+                && $serialize != 1
+            ) {
+                Original::sendPlainTextHeader();
+            }
+
             $response = var_export($response, true);
         }
 
@@ -53,7 +63,8 @@ class Controller extends \Piwik\Plugin\Controller
 
         $ApiDocumentation = new DocumentationGenerator();
         $prefixUrls = Common::getRequestVar('prefixUrl', 'https://demo.matomo.org/', 'string');
-        if (!UrlHelper::isLookLikeUrl($prefixUrls) || strpos($prefixUrls, 'http') !== 0) {
+        $hostname = parse_url($prefixUrls, PHP_URL_HOST);
+        if (empty($hostname) || !UrlHelper::isLookLikeUrl($prefixUrls) || strpos($prefixUrls, 'http') !== 0 || !Url::isValidHost($hostname)) {
             $prefixUrls = '';
         }
         return $ApiDocumentation->getApiDocumentationAsStringForDeveloperReference($outputExampleUrls = true, $prefixUrls);
@@ -66,7 +77,7 @@ class Controller extends \Piwik\Plugin\Controller
 
         $ApiDocumentation = new DocumentationGenerator();
         $view->countLoadedAPI = Proxy::getInstance()->getCountRegisteredClasses();
-        $view->list_api_methods_with_links = $ApiDocumentation->getApiDocumentationAsString();
+        $view->list_api_methods_with_links = str_replace('href=\'#', 'href=\'#/', $ApiDocumentation->getApiDocumentationAsString());
         return $view->render();
     }
 
@@ -182,13 +193,11 @@ class Controller extends \Piwik\Plugin\Controller
         foreach ($glossaryItems as &$item) {
             $item['letters'] = array();
             foreach ($item['entries'] as &$entry) {
-                $cleanEntryName = preg_replace('/["\']/', '', $entry['name']);
-                $entry['letter'] = Common::mb_strtoupper(substr($cleanEntryName, 0, 1));
-                $item['letters'][] = $entry['letter'];
+                $cleanEntryName = mb_ereg_replace('["\']', '', $entry['name']);
+                $letter = mb_strtoupper(mb_substr($cleanEntryName, 0, 1));
+                $entry['letter'] = $letter;
+                $item['letters'][$letter] = $letter;
             }
-
-            $item['letters'] = array_unique($item['letters']);
-            sort($item['letters']);
         }
 
         return $this->renderTemplate('glossary', array(

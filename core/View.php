@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,9 +11,11 @@ namespace Piwik;
 use Exception;
 use Piwik\AssetManager\UIAssetCacheBuster;
 use Piwik\Container\StaticContainer;
-use Piwik\Plugins\UsersManager\API as APIUsersManager;
+use Piwik\Plugins\CoreAdminHome\Controller;
+use Piwik\Plugins\CorePluginsAdmin\CorePluginsAdmin;
 use Piwik\View\ViewInterface;
-use Twig_Environment;
+use Piwik\View\SecurityPolicy;
+use Twig\Environment;
 
 /**
  * Transition for pre-Piwik 0.4.4
@@ -43,7 +45,6 @@ if (!defined('PIWIK_USER_PATH')) {
  * - **isWidget**: The value of the 'widget' query parameter.
  * - **show_autocompleter**: Whether the site selector should be shown or not.
  * - **loginModule**: The name of the currently used authentication module.
- * - **userAlias**: The alias of the current user.
  * - **isInternetEnabled**: Whether the matomo server is allowed to connect to
  *                          external networks.
  *
@@ -113,13 +114,24 @@ class View implements ViewInterface
 
     /**
      * Instance
-     * @var Twig_Environment
+     * @var Environment
      */
     private $twig;
     protected $templateVars = array();
     private $contentType = 'text/html; charset=utf-8';
     private $xFrameOptions = null;
     private $enableCacheBuster = true;
+
+    private $useStrictReferrerPolicy = true;
+
+    /**
+     * Can be disabled to not send headers when rendering a view. This can be useful if heaps of views are being
+     * rendered during one request to possibly prevent a segmentation fault see eg #15307 . It should not be disabled
+     * for a main view, but could be disabled for views that are being rendered eg during a twig event as a "subview" which
+     * is part of the "main view".
+     * @var bool
+     */
+    public $sendHeadersWhenRendering = true;
 
     /**
      * Constructor.
@@ -141,12 +153,19 @@ class View implements ViewInterface
         $this->piwik_version = Version::VERSION;
         $this->userLogin = Piwik::getCurrentUserLogin();
         $this->isSuperUser = Access::getInstance()->hasSuperUserAccess();
+        // following is used in ajaxMacros called macro (showMoreHelp as passed in other templates) - requestErrorDiv
+        $isGeneralSettingsAdminEnabled = Controller::isGeneralSettingsAdminEnabled();
+        $isPluginsAdminEnabled = CorePluginsAdmin::isPluginsAdminEnabled();
+        // simplify template usage
+        $this->showMoreFaqInfo = $this->isSuperUser && ($isGeneralSettingsAdminEnabled || $isPluginsAdminEnabled);
 
         try {
             $this->piwikUrl = SettingsPiwik::getPiwikUrl();
         } catch (Exception $ex) {
             // pass (occurs when DB cannot be connected to, perhaps piwik URL cache should be stored in config file...)
         }
+
+        $this->userRequiresPasswordConfirmation = Piwik::doesUserRequirePasswordConfirmation(Piwik::getCurrentUserLogin());
     }
 
     /**
@@ -224,15 +243,9 @@ class View implements ViewInterface
         unset($this->templateVars[$name]);
     }
 
-    /** @var Twig */
-    static $twigCached = null;
-
     private function initializeTwig()
     {
-        if (empty(static::$twigCached)) {
-            static::$twigCached = new Twig();
-        }
-        $this->twig = static::$twigCached->getTwigEnvironment();
+        $this->twig = StaticContainer::get(Twig::class)->getTwigEnvironment();
     }
 
     /**
@@ -258,6 +271,8 @@ class View implements ViewInterface
             $this->isWidget = Common::getRequestVar('widget', 0, 'int');
             $this->isMultiServerEnvironment = SettingsPiwik::isMultiServerEnvironment();
             $this->isInternetEnabled = SettingsPiwik::isInternetEnabled();
+            $this->shouldPropagateTokenAuth = $this->shouldPropagateTokenAuthInAjaxRequests();
+            $this->isAutoUpdateEnabled = SettingsPiwik::isAutoUpdateEnabled();
 
             $piwikAds = StaticContainer::get('Piwik\ProfessionalServices\Advertising');
             $this->areAdsForProfessionalServicesEnabled = $piwikAds->areAdsForProfessionalServicesEnabled();
@@ -270,22 +285,35 @@ class View implements ViewInterface
             $this->cacheBuster = $cacheBuster;
 
             $this->loginModule = Piwik::getLoginPluginName();
-
-            $user = APIUsersManager::getInstance()->getUser($this->userLogin);
-            $this->userAlias = $user['alias'];
         } catch (Exception $e) {
             Log::debug($e);
 
             // can fail, for example at installation (no plugin loaded yet)
         }
 
-        ProxyHttp::overrideCacheControlHeaders('no-store');
+        if ($this->sendHeadersWhenRendering) {
+            ProxyHttp::overrideCacheControlHeaders('no-store');
 
-        Common::sendHeader('Content-Type: ' . $this->contentType);
-        // always sending this header, sometimes empty, to ensure that Dashboard embed loads
-        // - when calling sendHeader() multiple times, the last one prevails
-        if(!empty($this->xFrameOptions)) {
-            Common::sendHeader('X-Frame-Options: ' . (string)$this->xFrameOptions);
+            Common::sendHeader('Content-Type: ' . $this->contentType);
+            // always sending this header, sometimes empty, to ensure that Dashboard embed loads
+            // - when calling sendHeader() multiple times, the last one prevails
+            if(!empty($this->xFrameOptions)) {
+                Common::sendHeader('X-Frame-Options: ' . (string)$this->xFrameOptions);
+            }
+
+            // don't send Referer-Header for outgoing links
+            if (!empty($this->useStrictReferrerPolicy)) {
+                Common::sendHeader('Referrer-Policy: same-origin');
+            } else {
+                // always send explicit default header
+                Common::sendHeader('Referrer-Policy: no-referrer-when-downgrade');
+            }
+
+            // this will be an empty string if CSP is disabled
+            $cspHeader = StaticContainer::get(SecurityPolicy::class)->createHeaderString();
+            if ('' !== $cspHeader) {
+                Common::sendHeader($cspHeader);
+            }
         }
 
         return $this->renderTwigTemplate();
@@ -294,7 +322,7 @@ class View implements ViewInterface
     /**
      * @internal
      * @ignore
-     * @return Twig_Environment
+     * @return Environment
      */
     public function getTwig()
     {
@@ -303,43 +331,43 @@ class View implements ViewInterface
 
     protected function renderTwigTemplate()
     {
-        try {
-            $output = $this->twig->render($this->getTemplateFile(), $this->getTemplateVars());
-        } catch (Exception $ex) {
-            // twig does not rethrow exceptions, it wraps them so we log the cause if we can find it
-            $cause = $ex->getPrevious();
-            Log::debug($cause === null ? $ex : $cause);
-
-            throw $ex;
-        }
+        $output = $this->twig->render($this->getTemplateFile(), $this->getTemplateVars());
 
         if ($this->enableCacheBuster) {
-            $output = $this->applyFilter_cacheBuster($output);
+            $output = $this->applyFilterCacheBuster($output);
         }
 
-        $helper = new Theme;
+        $helper = new Theme();
         $output = $helper->rewriteAssetsPathToTheme($output);
         return $output;
     }
 
-    protected function applyFilter_cacheBuster($output)
+    protected function applyFilterCacheBuster($output)
     {
-        $assetManager = AssetManager::getInstance();
+        $cacheBuster = UIAssetCacheBuster::getInstance();
+        $cache = Cache::getTransientCache();
 
-        $stylesheet = $assetManager->getMergedStylesheetAsset();
-        if ($stylesheet->exists()) {
-            $content = $stylesheet->getContent();
-        } else {
-            $content = $assetManager->getMergedStylesheet()->getContent();
+        $cssCacheBusterId = $cache->fetch('cssCacheBusterId');
+        if (empty($cssCacheBusterId)) {
+            $assetManager = AssetManager::getInstance();
+            $stylesheet = $assetManager->getMergedStylesheetAsset();
+            if ($stylesheet->exists()) {
+                $content = $stylesheet->getContent();
+            } else {
+                $content = $assetManager->getMergedStylesheet()->getContent();
+            }
+            $cssCacheBusterId = $cacheBuster->md5BasedCacheBuster($content);
+            $cache->save('cssCacheBusterId', $cssCacheBusterId);
         }
 
-        $cacheBuster = UIAssetCacheBuster::getInstance();
-        $tagJs       = 'cb=' . $cacheBuster->piwikVersionBasedCacheBuster();
-        $tagCss      = 'cb=' . $cacheBuster->md5BasedCacheBuster($content);
+        $tagJs  = 'cb=' . ($this->cacheBuster ?? $cacheBuster->piwikVersionBasedCacheBuster());
+        $tagCss = 'cb=' . $cssCacheBusterId;
 
         $pattern = array(
             '~<script type=[\'"]text/javascript[\'"] src=[\'"]([^\'"]+)[\'"]>~',
             '~<script src=[\'"]([^\'"]+)[\'"] type=[\'"]text/javascript[\'"]>~',
+            '~<script type=[\'"]text/javascript[\'"] src=[\'"]([^\'"?]*\?[^\'"]+)[\'"] defer>~',
+            '~<script type=[\'"]text/javascript[\'"] src=[\'"]([^\'"?]+)[\'"] defer>~',
             '~<link rel=[\'"]stylesheet[\'"] type=[\'"]text/css[\'"] href=[\'"]([^\'"]+)[\'"] ?/?>~',
             // removes the double ?cb= tag
             '~(src|href)=\"index.php\?module=([A-Za-z0-9_]+)&action=([A-Za-z0-9_]+)\?cb=~',
@@ -348,6 +376,8 @@ class View implements ViewInterface
         $replace = array(
             '<script type="text/javascript" src="$1?' . $tagJs . '">',
             '<script type="text/javascript" src="$1?' . $tagJs . '">',
+            '<script type="text/javascript" src="$1&' . $tagJs . '" defer>',
+            '<script type="text/javascript" src="$1?' . $tagJs . '" defer>',
             '<link rel="stylesheet" type="text/css" href="$1?' . $tagCss . '" />',
             '$1="index.php?module=$2&amp;action=$3&amp;cb=',
         );
@@ -423,15 +453,12 @@ class View implements ViewInterface
      */
     public static function clearCompiledTemplates()
     {
-        $twig = new Twig();
-        $environment = $twig->getTwigEnvironment();
-        $environment->clearTemplateCache();
-
-        $cacheDirectory = $environment->getCache();
-        if (!empty($cacheDirectory)
-            && is_dir($cacheDirectory)
-        ) {
-            $environment->clearCacheFiles();
+        $enable = StaticContainer::get('view.clearcompiledtemplates.enable');
+        if ($enable) {
+            // some high performance systems that run many Matomo instances may never want to clear this template cache
+            // if they use eg a blue/green deployment
+            $templatesCompiledPath = StaticContainer::get('path.tmp.templates');
+            Filesystem::unlinkRecursive($templatesCompiledPath, false);
         }
     }
 
@@ -451,5 +478,43 @@ class View implements ViewInterface
         $view->title = $title;
         $view->report = $reportHtml;
         return $view->render();
+    }
+
+    private function shouldPropagateTokenAuthInAjaxRequests()
+    {
+        $generalConfig = Config::getInstance()->General;
+        return Common::getRequestVar('module', false) == 'Widgetize' ||
+            $generalConfig['enable_framed_pages'] == '1' ||
+            $this->validTokenAuthInUrl();
+    }
+
+    /**
+     * @return bool
+     * @throws Exception
+     */
+    private function validTokenAuthInUrl()
+    {
+        $tokenAuth = Common::getRequestVar('token_auth', '', 'string', $_GET);
+        return ($tokenAuth && $tokenAuth === Piwik::getCurrentUserTokenAuth());
+    }
+
+    /**
+     * Returns whether a strict Referrer-Policy header will be sent. Generally this should be set to 'true'.
+     *
+     * @return bool
+     */
+    public function getUseStrictReferrerPolicy()
+    {
+        return $this->useStrictReferrerPolicy;
+    }
+
+    /**
+     * Sets whether a strict Referrer-Policy header will be sent (if not, nothing is sent).
+     *
+     * @param bool $useStrictReferrerPolicy
+     */
+    public function setUseStrictReferrerPolicy($useStrictReferrerPolicy)
+    {
+        $this->useStrictReferrerPolicy = $useStrictReferrerPolicy;
     }
 }

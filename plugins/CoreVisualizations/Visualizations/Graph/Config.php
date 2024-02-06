@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -16,7 +16,6 @@ use Piwik\ViewDataTable\Config as VisualizationConfig;
  */
 class Config extends VisualizationConfig
 {
-
     /**
      * Whether the series picker should allow picking more than one series or not.
      *
@@ -39,7 +38,8 @@ class Config extends VisualizationConfig
     public $selectable_columns = false;
 
     /**
-     * Contains the column (if any) of the values used in the Row Picker.
+     * Contains the column or metadata (if any) of the values used in the Row Picker.
+     * The defined column or metadata will be used as identifier for the row, the label column will always be used as value
      *
      * @see self::ROWS_TO_DISPLAY
      *
@@ -63,7 +63,7 @@ class Config extends VisualizationConfig
      *
      * @see self::ROW_PICKER_VALUE_COLUMN
      */
-    public $selectable_rows = 'selectable_rows';
+    public $selectable_rows = [];
 
     /**
      * Controls whether all ticks & labels are shown on a graph's x-axis or just some.
@@ -118,5 +118,4 @@ class Config extends VisualizationConfig
             'show_series_picker'
         ));
     }
-
 }

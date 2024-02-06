@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -16,21 +16,22 @@ use Piwik\Config;
 use Piwik\Container\StaticContainer;
 use Piwik\DataAccess\ArchiveTableCreator;
 use Piwik\Db;
-use Piwik\Db\Adapter;
 use Piwik\DbHelper;
 use Piwik\Filesystem;
-use Piwik\Http;
 use Piwik\Option;
 use Piwik\Piwik;
 use Piwik\Plugin\Manager;
+use Piwik\Plugins\CoreVue\CoreVue;
+use Piwik\Plugins\Diagnostics\DiagnosticReport;
 use Piwik\Plugins\Diagnostics\DiagnosticService;
 use Piwik\Plugins\LanguagesManager\LanguagesManager;
 use Piwik\Plugins\SitesManager\API as APISitesManager;
-use Piwik\Plugins\UserCountry\LocationProvider;
+use Piwik\Plugins\SitesManager\SitesManager;
 use Piwik\Plugins\UsersManager\API as APIUsersManager;
+use Piwik\Plugins\UsersManager\NewsletterSignup;
+use Piwik\Plugins\UsersManager\UserUpdater;
 use Piwik\ProxyHeaders;
 use Piwik\SettingsPiwik;
-use Piwik\Theme;
 use Piwik\Tracker\TrackerCodeGenerator;
 use Piwik\Translation\Translator;
 use Piwik\Updater;
@@ -44,6 +45,11 @@ use Zend_Db_Adapter_Exception;
  */
 class Controller extends \Piwik\Plugin\ControllerAdmin
 {
+    public function __construct()
+    {
+        parent::__construct();
+    }
+
     public $steps = array(
         'welcome'           => 'Installation_Welcome',
         'systemCheck'       => 'Installation_SystemCheck',
@@ -118,6 +124,8 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         /** @var DiagnosticService $diagnosticService */
         $diagnosticService = StaticContainer::get('Piwik\Plugins\Diagnostics\DiagnosticService');
         $view->diagnosticReport = $diagnosticService->runDiagnostics();
+        $view->isInstallation = true;
+        $view->systemCheckInfo = $this->getSystemCheckTextareaValue($view->diagnosticReport);
 
         $view->showNextStep = !$view->diagnosticReport->hasErrors();
 
@@ -150,6 +158,7 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
                 $dbInfos = $form->createDatabaseObject();
 
                 DbHelper::checkDatabaseVersion();
+
 
                 Db::get()->checkClientVersion();
 
@@ -207,6 +216,7 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
 
             DbHelper::createTables();
             DbHelper::createAnonymousUser();
+            DbHelper::recordInstallVersion();
 
             $this->updateComponents();
 
@@ -276,16 +286,23 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         if ($form->validate()) {
 
             try {
-                $this->createSuperUser($form->getSubmitValue('login'),
-                                       $form->getSubmitValue('password'),
-                                       $form->getSubmitValue('email'));
-
+                $loginName = $form->getSubmitValue('login');
                 $email = $form->getSubmitValue('email');
+
+                $this->createSuperUser($loginName,
+                                       $form->getSubmitValue('password'),
+                                       $email);
+
                 $newsletterPiwikORG = $form->getSubmitValue('subscribe_newsletter_piwikorg');
                 $newsletterProfessionalServices = $form->getSubmitValue('subscribe_newsletter_professionalservices');
-                $this->registerNewsletter($email, $newsletterPiwikORG, $newsletterProfessionalServices);
+                NewsletterSignup::signupForNewsletter(
+                    $loginName,
+                    $email,
+                    $newsletterPiwikORG,
+                    $newsletterProfessionalServices
+                );
+                Onboarding::sendSysAdminMail($email);
                 $this->redirectToNextStep(__FUNCTION__);
-
             } catch (Exception $e) {
                 $view->errorMessage = $e->getMessage();
             }
@@ -336,7 +353,6 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
                     'site_idSite' => $result,
                     'site_name' => urlencode($name)
                 );
-                $this->addTrustedHosts($url);
 
                 $this->redirectToNextStep(__FUNCTION__, $params);
             } catch (Exception $e) {
@@ -369,11 +385,21 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $siteName = Common::unsanitizeInputValue($this->getParam('site_name'));
         $idSite = $this->getParam('site_idSite');
 
+        $javascriptGenerator = new TrackerCodeGenerator();
+        $jsTag = $javascriptGenerator->generate($idSite, Url::getCurrentUrlWithoutFileName());
+
+        // Needs to be generated as super user, as API requests would otherwise fail
+        $emailBody = Access::doAsSuperUser(
+            function () use ($idSite) {
+                return SitesManager::renderTrackingCodeEmail($idSite);
+            }
+        );
+
         // Load the Tracking code and help text from the SitesManager
         $viewTrackingHelp = new \Piwik\View('@SitesManager/_displayJavascriptCode');
         $viewTrackingHelp->displaySiteName = $siteName;
-        $javascriptGenerator = new TrackerCodeGenerator();
-        $viewTrackingHelp->jsTag = $javascriptGenerator->generate($idSite, Url::getCurrentUrlWithoutFileName());
+        $viewTrackingHelp->jsTag = $jsTag;
+        $viewTrackingHelp->emailBody = $emailBody;
         $viewTrackingHelp->idSite = $idSite;
         $viewTrackingHelp->piwikUrl = Url::getCurrentUrlWithoutFileName();
         $viewTrackingHelp->isInstall = true;
@@ -431,7 +457,6 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $view->addForm($form);
 
         $view->showNextStep = false;
-        $view->linkToProfessionalServices = StaticContainer::get('Piwik\ProfessionalServices\Advertising')->getPromoUrlForProfessionalServices($medium = 'App_InstallationFinished');
         $output = $view->render();
 
         return $output;
@@ -469,7 +494,7 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         /** @var DiagnosticService $diagnosticService */
         $diagnosticService = StaticContainer::get('Piwik\Plugins\Diagnostics\DiagnosticService');
         $view->diagnosticReport = $diagnosticService->runDiagnostics();
-
+        $view->systemCheckInfo = $this->getSystemCheckTextareaValue($view->diagnosticReport);
         return $view->render();
     }
 
@@ -499,8 +524,8 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $files = array(
             'plugins/Morpheus/stylesheets/base/bootstrap.css',
             'plugins/Morpheus/stylesheets/base/icons.css',
-            'libs/jquery/themes/base/jquery-ui.min.css',
-            'libs/bower_components/materialize/dist/css/materialize.min.css',
+            "node_modules/jquery-ui-dist/jquery-ui.theme.min.css",
+            'node_modules/@materializecss/materialize/dist/css/materialize.min.css',
             'plugins/Morpheus/stylesheets/base.less',
             'plugins/Morpheus/stylesheets/general/_forms.less',
             'plugins/Installation/stylesheets/installation.css'
@@ -520,27 +545,28 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         Common::sendHeader('Cache-Control: max-age=' . (60 * 60));
 
         $files = array(
-            'libs/bower_components/jquery/dist/jquery.min.js',
-            'libs/bower_components/jquery-ui/ui/minified/jquery-ui.min.js',
-            'libs/bower_components/materialize/dist/js/materialize.min.js',
-            'libs/bower_components/angular/angular.min.js',
-            'libs/bower_components/angular-sanitize/angular-sanitize.js',
-            'libs/bower_components/angular-animate/angular-animate.js',
-            'libs/bower_components/angular-cookies/angular-cookies.js',
-            'libs/bower_components/ngDialog/js/ngDialog.min.js',
-            'plugins/CoreHome/angularjs/common/services/service.module.js',
-            'plugins/CoreHome/angularjs/common/filters/filter.module.js',
-            'plugins/CoreHome/angularjs/common/filters/translate.js',
-            'plugins/CoreHome/angularjs/common/directives/directive.module.js',
-            'plugins/CoreHome/angularjs/common/directives/focus-anywhere-but-here.js',
-            'plugins/CoreHome/angularjs/piwikApp.config.js',
-            'plugins/CoreHome/angularjs/piwikApp.js',
+            "node_modules/jquery/dist/jquery.min.js",
+            "node_modules/jquery-ui-dist/jquery-ui.min.js",
+            'node_modules/@materializecss/materialize/dist/js/materialize.min.js',
+            "plugins/CoreHome/javascripts/materialize-bc.js",
             'plugins/Installation/javascripts/installation.js',
+            'plugins/Morpheus/javascripts/piwikHelper.js',
+            "plugins/CoreHome/javascripts/broadcast.js",
         );
+
+        CoreVue::addJsFilesTo($files);
+
+        $files[] = AssetManager\UIAssetFetcher\PluginUmdAssetFetcher::getUmdFileToUseForPlugin('CoreHome');
+        $files[] = AssetManager\UIAssetFetcher\PluginUmdAssetFetcher::getUmdFileToUseForPlugin('Installation');
+
+        if (defined('PIWIK_TEST_MODE') && PIWIK_TEST_MODE
+            && file_exists(PIWIK_DOCUMENT_ROOT . '/tests/resources/screenshot-override/override.js')) {
+            $files[] = 'tests/resources/screenshot-override/override.js';
+        }
 
         return AssetManager::compileCustomJs($files);
     }
-    
+
     private function getParam($name)
     {
         return Common::getRequestVar($name, false, 'string');
@@ -554,9 +580,6 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $config = Config::getInstance();
 
         // make sure DB sessions are used if the filesystem is NFS
-        if (Filesystem::checkIfFileSystemIsNFS()) {
-            $config->General['session_save_handler'] = 'dbtable';
-        }
         if (count($headers = ProxyHeaders::getProxyClientHeaders()) > 0) {
             $config->General['proxy_client_headers'] = $headers;
         }
@@ -577,11 +600,10 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
 
         $config->General['salt'] = Common::generateUniqId();
         $config->General['installation_in_progress'] = 1;
+        $this->setTrustedHost($config);
 
         $config->database = $dbInfos;
-        if (!DbHelper::isDatabaseConnectionUTF8()) {
-            $config->database['charset'] = 'utf8';
-        }
+        $config->database['charset'] = DbHelper::getDefaultCharset();
 
         $config->forceSave();
 
@@ -599,7 +621,7 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
 
     private function checkPiwikIsNotInstalled($possibleErrorMessage = null)
     {
-        if (!SettingsPiwik::isPiwikInstalled()) {
+        if (!SettingsPiwik::isMatomoInstalled()) {
             return;
         }
 
@@ -645,51 +667,44 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
      *
      * @return string|false
      */
-    private function extractHost($url)
+    private function extractHostAndPort($url)
     {
-        $urlParts = parse_url($url);
-        if (isset($urlParts['host']) && strlen($host = $urlParts['host'])) {
-            return $host;
+        $host = parse_url($url, PHP_URL_HOST) ?? false;
+
+        if (empty($host)) {
+            return false;
         }
 
-        return false;
+        $port = (int) parse_url($url, PHP_URL_PORT) ?? 0;
+
+        if (!empty($port) && $port !== 80 && $port !== 443) {
+            return $host . ':' . $port;
+        }
+
+        return $host;
     }
 
     /**
-     * Add trusted hosts
+     * Sets trusted hosts in config
      */
-    private function addTrustedHosts($siteUrl)
+    private function setTrustedHost(Config $config): void
     {
-        $trustedHosts = array();
+        $host = Url::getHost(false);
 
-        // extract host from the request header
-        if (($host = $this->extractHost('http://' . Url::getHost())) !== false) {
-            $trustedHosts[] = $host;
-        }
-
-        // extract host from first web site
-        if (($host = $this->extractHost(urldecode($siteUrl))) !== false) {
-            $trustedHosts[] = $host;
-        }
-
-        $trustedHosts = array_unique($trustedHosts);
-        if (count($trustedHosts)) {
-
-            $general = Config::getInstance()->General;
-            $general['trusted_hosts'] = $trustedHosts;
-            Config::getInstance()->General = $general;
-
-            Config::getInstance()->forceSave();
+        // check hostname in server variables is correctly parsable
+        if ($host === $this->extractHostAndPort('http://' . $host)) {
+            $config->General['trusted_hosts'] = [$host];
         }
     }
 
     private function createSuperUser($login, $password, $email)
     {
-        $self = $this;
-        Access::doAsSuperUser(function () use ($self, $login, $password, $email) {
+        Access::doAsSuperUser(function () use ($login, $password, $email) {
             $api = APIUsersManager::getInstance();
             $api->addUser($login, $password, $email);
-            $api->setSuperUserAccess($login, true);
+
+            $userUpdater = new UserUpdater();
+            $userUpdater->setSuperUserAccessWithoutCurrentPassword($login, true);
         });
     }
 
@@ -720,40 +735,6 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
     }
 
     /**
-     * @param $email
-     * @param $newsletterPiwikORG
-     * @param $newsletterProfessionalServices
-     */
-    protected function registerNewsletter($email, $newsletterPiwikORG, $newsletterProfessionalServices)
-    {
-        $url = Config::getInstance()->General['api_service_url'];
-        $url .= '/1.0/subscribeNewsletter/';
-        $params = array(
-            'email'     => $email,
-            'piwikorg'  => $newsletterPiwikORG,
-            'piwikpro'  => $newsletterProfessionalServices,
-            'url'       => Url::getCurrentUrlWithoutQueryString(),
-            'language'  => StaticContainer::get('Piwik\Translation\Translator')->getCurrentLanguage(),
-        );
-        if ($params['piwikorg'] == '1'
-            || $params['piwikpro'] == '1'
-        ) {
-            if (!isset($params['piwikorg'])) {
-                $params['piwikorg'] = '0';
-            }
-            if (!isset($params['piwikpro'])) {
-                $params['piwikpro'] = '0';
-            }
-            $url .= '?' . Http::buildQuery($params);
-            try {
-                Http::sendHttpRequest($url, $timeout = 2);
-            } catch (Exception $e) {
-                // e.g., disable_functions = fsockopen; allow_url_open = Off
-            }
-        }
-    }
-
-    /**
      * @return array|bool
      */
     protected function updateComponents()
@@ -772,4 +753,10 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         });
     }
 
+    private function getSystemCheckTextareaValue(DiagnosticReport $diagnosticReport)
+    {
+        $view = new \Piwik\View('@Installation/_systemCheckSection');
+        $view->diagnosticReport = $diagnosticReport;
+        return $view->render();
+    }
 }

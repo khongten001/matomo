@@ -1,16 +1,18 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Plugins\Goals\Columns\Metrics\GoalSpecific;
 
+use Piwik\Columns\Dimension;
 use Piwik\DataTable\Row;
 use Piwik\Metrics;
 use Piwik\Piwik;
 use Piwik\Plugins\Goals\Columns\Metrics\GoalSpecificProcessedMetric;
+use Piwik\Plugins\Goals\Goals;
 
 /**
  * The number of ecommerce order items for conversions of a goal. Returns the 'items'
@@ -20,7 +22,7 @@ class ItemsCount extends GoalSpecificProcessedMetric
 {
     public function getName()
     {
-        return $this->getColumnPrefix() . '_items';
+        return Goals::makeGoalColumn($this->idGoal, 'items', false);
     }
 
     public function getTranslatedName()
@@ -44,5 +46,10 @@ class ItemsCount extends GoalSpecificProcessedMetric
 
         $goalMetrics = $this->getGoalMetrics($row);
         return (int) $this->getMetric($goalMetrics, 'items', $mappingFromNameToIdGoal);
+    }
+
+    public function getSemanticType(): ?string
+    {
+        return Dimension::TYPE_NUMBER;
     }
 }

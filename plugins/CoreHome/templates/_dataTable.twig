@@ -2,7 +2,7 @@
     {% include visualizationTemplate %}
 {%- else -%}
 
-{% set isDataTableEmpty = (dataTable is empty or dataTableHasNoData|default(false)) %}
+{% set isDataTableEmpty = (dataTable is not defined or dataTable is null or dataTableHasNoData|default(false)) %}
 
 {% set showCardAsContentBlock = (properties.show_as_content_block and properties.show_title and not isWidget) %}
 {% set showOnlyTitleWithoutCard = not showCardAsContentBlock and properties.title and properties.show_title %}
@@ -13,7 +13,8 @@
     {% if properties.title %}
         <h2 class="card-title"
             {% if properties.title_edit_entity_url %}edit-url="{{ properties.title_edit_entity_url }}"{% endif %}
-              piwik-enriched-headline
+            report-generated="{% if reportLastUpdatedMessage is defined %}{{ reportLastUpdatedMessage|raw }}{% endif %}"
+              vue-entry="CoreHome.EnrichedHeadline"
         >{{ properties.title }}</h2>
     {% endif %}
 {% elseif showOnlyTitleWithoutCard %}
@@ -29,7 +30,7 @@
 
 {% set summaryRowId = constant('Piwik\\DataTable::ID_SUMMARY_ROW') %}{# ID_SUMMARY_ROW #}
 {% set isSubtable = javascriptVariablesToSet.idSubtable is defined and javascriptVariablesToSet.idSubtable != 0 %}
-<div class="dataTable {{ visualizationCssClass }} {{ properties.datatable_css_class|default('') }} {% if isSubtable %}subDataTable{% endif %}"
+<div class="dataTable {{ visualizationCssClass }} {{ properties.datatable_css_class|default('') }} {% if isSubtable %}subDataTable{% endif %} {% if isComparing|default(false) %}isComparing{% endif %}"
      data-table-type="{{ properties.datatable_js_type }}"
      data-report="{{ properties.report_id }}"
      data-report-metadata="{{ reportMetdadata|json_encode|e('html_attr') }}"
@@ -40,14 +41,14 @@
         <div class="card-description">{{ properties.description }}</div>
     {% endif %}
 
-    <div class="reportDocumentation">
-        {% if properties.documentation|default is not empty %}<p>{{ properties.documentation|raw }}</p>{% endif %}
-        {% if reportLastUpdatedMessage is defined and reportLastUpdatedMessage %}<span class='helpDate'>{{ reportLastUpdatedMessage|raw }}</span>{% endif %}
+    <div class="reportDocumentation" data-content="{{ properties.documentation|default|e('html_attr') }}">
+        {% if properties.onlineGuideUrl|default is not empty %}<a href="{{ properties.onlineGuideUrl|safelink|e('html_attr') }}" target="_blank" rel="noreferrer noopener" class="onlineGuide">{{ 'CoreHome_ReadMoreOnlineGuide'|translate }}</a>{% endif %}
+        {% if reportLastUpdatedMessage is defined and reportLastUpdatedMessage %}<span class="helpDate">{{ reportLastUpdatedMessage|raw }}</span>{% endif %}
     </div>
 
     <div class="dataTableWrapper">
         {% if error is defined %}
-            {{ error.message }}
+            <div vue-entry="CoreHome.Alert" severity="danger">{{ error.message }}</div>
         {% else %}
             {% if properties.show_header_message is defined and properties.show_header_message is not empty %}
                 <div class='datatableHeaderMessage'>{{ properties.show_header_message | raw }}</div>
@@ -57,6 +58,8 @@
                 <div class="pk-emptyDataTable">
                 {% if showReportDataWasPurgedMessage is defined and showReportDataWasPurgedMessage %}
                     {{ 'CoreHome_DataForThisReportHasBeenPurged'|translate(deleteReportsOlderThan) }}
+                {% elseif showPluginArchiveDisabled is defined and showPluginArchiveDisabled%}
+                    {{ 'CoreHome_DataForThisReportHasBeenDisabled'|translate(externallink('https://matomo.org/faq/how-to-disable-archiving-the-segment-reports-for-specific-plugins'), '</a>')|raw }}
                 {% elseif properties.no_data_message %}
                     {{ properties.no_data_message|raw }}
                 {% else %}
@@ -71,7 +74,7 @@
                 {% include "@CoreHome/_dataTableFooter.twig" %}
             {% endif %}
 
-            {% include "@CoreHome/_dataTableJS.twig" %}
+            {% include "@CoreHome/_dataTableJS.twig" with { reportId: properties.report_id } %}
         {% endif %}
     </div>
 </div>

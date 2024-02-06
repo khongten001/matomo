@@ -1,15 +1,17 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
+
 namespace Piwik\AssetManager\UIAsset;
 
 use Exception;
 use Piwik\AssetManager\UIAsset;
+use Piwik\Common;
 use Piwik\Filesystem;
 
 class OnDiskUIAsset extends UIAsset
@@ -25,13 +27,26 @@ class OnDiskUIAsset extends UIAsset
     private $relativeLocation;
 
     /**
+     * @var string
+     */
+    private $relativeRootDir;
+
+    /**
      * @param string $baseDirectory
      * @param string $fileLocation
      */
-    public function __construct($baseDirectory, $fileLocation)
+    public function __construct($baseDirectory, $fileLocation, $relativeRootDir = '')
     {
         $this->baseDirectory = $baseDirectory;
         $this->relativeLocation = $fileLocation;
+
+        if (!empty($relativeRootDir)
+            && is_string($relativeRootDir)
+            && !Common::stringEndsWith($relativeRootDir, '/')) {
+            $relativeRootDir .= '/';
+        }
+
+        $this->relativeRootDir = $relativeRootDir;
     }
 
     public function getAbsoluteLocation()
@@ -41,6 +56,9 @@ class OnDiskUIAsset extends UIAsset
 
     public function getRelativeLocation()
     {
+        if (isset($this->relativeRootDir)) {
+            return $this->relativeRootDir . $this->relativeLocation;
+        }
         return $this->relativeLocation;
     }
 
@@ -75,14 +93,16 @@ class OnDiskUIAsset extends UIAsset
      * @param string $content
      * @throws \Exception
      */
-    public function writeContent($content)
+    public function writeContent($content): void
     {
         $this->delete();
 
-        $newFile = @fopen($this->getAbsoluteLocation(), "w");
+        $location = $this->getAbsoluteLocation();
+
+        $newFile = @fopen($location, 'w');
 
         if (!$newFile) {
-            throw new Exception("The file : " . $newFile . " can not be opened in write mode.");
+            throw new Exception('The file : ' . $location . ' can not be opened in write mode.');
         }
 
         fwrite($newFile, $content);

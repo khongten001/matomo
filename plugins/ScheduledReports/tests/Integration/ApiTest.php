@@ -1,16 +1,19 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
-namespace Piwik\Plugins\ScheduledReports\tests;
+namespace Piwik\Plugins\ScheduledReports\tests\Integration;
 
 use Piwik\API\Proxy;
+use Piwik\API\Request;
+use Piwik\Container\StaticContainer;
 use Piwik\DataTable;
 use Piwik\Date;
+use Piwik\Piwik;
 use Piwik\Plugins\MobileMessaging\API as APIMobileMessaging;
 use Piwik\Plugins\MobileMessaging\MobileMessaging;
 use Piwik\Plugins\ScheduledReports\API as APIScheduledReports;
@@ -40,7 +43,7 @@ class ApiTest extends IntegrationTestCase
 {
     private $idSite = 1;
 
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -57,6 +60,92 @@ class ApiTest extends IntegrationTestCase
         APIScheduledReports::$cache = array();
     }
 
+    public function test_sendReport_overridesParametersCorrectly()
+    {
+        $reportIds = [
+            'UserCountry_getCity',
+            'DevicesDetection_getType',
+        ];
+
+        Piwik::addAction(APIScheduledReports::GET_REPORT_TYPES_EVENT, function (&$reportTypes) {
+            $reportTypes['dummyreporttype'] = 'dummyreporttype.png';
+        });
+
+        Piwik::addAction(APIScheduledReports::GET_REPORT_FORMATS_EVENT, function (&$reportFormats) {
+            $reportFormats['dummyreportformat'] = 'dummyreportformat.png';
+        });
+
+        Piwik::addAction(APIScheduledReports::GET_REPORT_METADATA_EVENT, function (&$availableReportData, $reportType, $idSite) {
+            if ($reportType == 'dummyreporttype') {
+                $availableReportData = \Piwik\Plugins\API\API::getInstance()->getReportMetadata($idSite);
+            }
+        });
+
+        Piwik::addAction(APIScheduledReports::GET_RENDERER_INSTANCE_EVENT, function (&$reportRenderer, $reportType, $outputType, $report) {
+            if ($reportType == 'dummyrepor') { // apparently this gets cut off
+                $reportRenderer = new class () extends ReportRenderer {
+                    public function setLocale($locale)
+                    {
+                    }
+                    public function sendToDisk($filename)
+                    {
+                        $path = PIWIK_INCLUDE_PATH . '/tmp/' . $filename;
+                        file_put_contents($path, 'dummyreportdata');
+                        return $path;
+                    }
+                    public function sendToBrowserDownload($filename)
+                    {
+                    }
+                    public function sendToBrowserInline($filename)
+                    {
+                    }
+                    public function getRenderedReport()
+                    {
+                    }
+                    public function renderFrontPage($reportTitle, $prettyDate, $description, $reportMetadata, $segment)
+                    {
+                    }
+                    public function renderReport($processedReport)
+                    {
+                    }
+                    public function getAttachments($report, $processedReports, $prettyDate)
+                    {
+                    }
+                };
+            }
+        });
+
+        $idReport = APIScheduledReports::getInstance()->addReport(
+            $this->idSite, 'send report', 'never', 6, 'dummyreporttype', 'dummyreportformat',
+            $reportIds, [ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY]);
+
+        $eventCalledWith = [];
+        Piwik::addAction(APIScheduledReports::SEND_REPORT_EVENT, function (
+            &$reportType,
+            $report,
+            $contents,
+            $filename,
+            $prettyDate,
+            $reportSubject,
+            $reportTitle,
+            $additionalFiles,
+            $period,
+            $force
+        ) {
+            $eventCalledWith[] = [$reportType, $report, $contents, $filename, $prettyDate, $reportSubject, $reportTitle, $additionalFiles,
+                $period->getLabel() . ' ' . $period->getRangeString(), $force];
+        });
+
+        Request::processRequest('ScheduledReports.sendReport', [
+            'idReport' => $idReport,
+            'period' => 'year',
+            'date' => '2018-02-04',
+        ]);
+
+        $expectedEventArgs = [];
+        $this->assertEquals($expectedEventArgs, $eventCalledWith);
+    }
+
     /**
      * @group Plugins
      */
@@ -67,6 +156,7 @@ class ApiTest extends IntegrationTestCase
             'description' => 'test description"',
             'type'        => 'email',
             'period'      => Schedule::PERIOD_DAY,
+            'period_param' => 'month',
             'hour'        => '4',
             'format'      => 'pdf',
             'reports'     => array('UserCountry_getCountry'),
@@ -117,12 +207,8 @@ class ApiTest extends IntegrationTestCase
      */
     public function testGetReportsIdReportNotFound()
     {
-        try {
-            APIScheduledReports::getInstance()->getReports($idSite = false, $period = false, $idReport = 1);
-        } catch (Exception $e) {
-            return;
-        }
-        $this->fail('Expected exception not raised');
+        $this->expectException(Exception::class);
+        APIScheduledReports::getInstance()->getReports($idSite = false, $period = false, $idReport = 1);
     }
 
     /**
@@ -130,17 +216,12 @@ class ApiTest extends IntegrationTestCase
      */
     public function testGetReportsInvalidPermission()
     {
-        try {
-            APIScheduledReports::getInstance()->getReports(
-                $idSite = 44,
-                $period = false,
-                self::addReport(self::getDailyPDFReportData($this->idSite))
-            );
-
-        } catch (Exception $e) {
-            return;
-        }
-        $this->fail('Expected exception not raised');
+        $this->expectException(Exception::class);
+        APIScheduledReports::getInstance()->getReports(
+            $idSite = 44,
+            $period = false,
+            self::addReport(self::getDailyPDFReportData($this->idSite))
+        );
     }
 
     /**
@@ -148,12 +229,8 @@ class ApiTest extends IntegrationTestCase
      */
     public function testAddReportInvalidWebsite()
     {
-        try {
-            self::addReport(self::getDailyPDFReportData(33));
-        } catch (Exception $e) {
-            return;
-        }
-        $this->fail('Expected exception not raised');
+        $this->expectException(Exception::class);
+        self::addReport(self::getDailyPDFReportData(33));
     }
 
     /**
@@ -161,14 +238,10 @@ class ApiTest extends IntegrationTestCase
      */
     public function testAddReportInvalidPeriod()
     {
-        try {
-            $data = self::getDailyPDFReportData($this->idSite);
-            $data['period'] = 'dx';
-            self::addReport($data);
-        } catch (Exception $e) {
-            return;
-        }
-        $this->fail('Expected exception not raised');
+        $this->expectException(Exception::class);
+        $data = self::getDailyPDFReportData($this->idSite);
+        $data['period'] = 'dx';
+        self::addReport($data);
     }
 
     /**
@@ -363,12 +436,11 @@ class ApiTest extends IntegrationTestCase
                                            ->disableOriginalConstructor()
                                            ->getMock();
         $stubbedAPIScheduledReports->expects($this->any())->method('getReports')->will($this->returnValue(
-                array($report1, $report2, $report3, $report4, $report5, $report6))
-        );
+                array($report1, $report2, $report3, $report4, $report5, $report6)));
         \Piwik\Plugins\ScheduledReports\API::setSingletonInstance($stubbedAPIScheduledReports);
 
         // initialize sites 1 and 2
-        Site::setSites( array(
+        Site::setSites(array(
             1 => array('timezone' => 'Europe/Paris'),
             2 => array('timezone' => 'UTC-6.5'),
         ));
@@ -404,7 +476,6 @@ class ApiTest extends IntegrationTestCase
         $this->assertEquals($expectedTasks, $tasks);
 
         \Piwik\Plugins\ScheduledReports\API::unsetInstance();
-
     }
 
     /**
@@ -431,7 +502,7 @@ class ApiTest extends IntegrationTestCase
         );
         $getReportSubjectAndReportTitle->setAccessible(true);
 
-        list($reportSubject, $reportTitle) = $getReportSubjectAndReportTitle->invoke( APIScheduledReports::getInstance(), $websiteName, $reports);
+        [$reportSubject, $reportTitle] = $getReportSubjectAndReportTitle->invoke(APIScheduledReports::getInstance(), $websiteName, $reports);
         $this->assertEquals($expectedReportSubject, $reportSubject);
         $this->assertEquals($expectedReportTitle, $reportTitle);
     }
@@ -454,12 +525,13 @@ class ApiTest extends IntegrationTestCase
                     $result->addRowFromSimpleArray(array('label' => 'referrers label', 'nb_visits' => 1));
                     return $result;
                 case '\Piwik\Plugins\API\API':
+                case '\Piwik\Plugins\LanguagesManager\API':
                     return $realProxy->call($className, $methodName, $parametersRequest);
                 default:
                     throw new \Exception("Unexpected method $className::$methodName.");
             }
         });
-        Proxy::setSingletonInstance($mockProxy);
+        StaticContainer::getContainer()->set(Proxy::class, $mockProxy);
 
         $idReport = APIScheduledReports::getInstance()->addReport(
             1,
@@ -481,15 +553,383 @@ class ApiTest extends IntegrationTestCase
             $language = false, $outputType = APIScheduledReports::OUTPUT_RETURN);
         ob_end_clean();
 
-        $this->assertContains('id="VisitsSummary_get"', $result);
-        $this->assertContains('id="Referrers_getWebsites"', $result);
-        $this->assertNotContains('id="UserCountry_getCountry"', $result);
+        self::assertStringContainsString('id="VisitsSummary_get"', $result);
+        self::assertStringContainsString('id="Referrers_getWebsites"', $result);
+        self::assertStringNotContainsString('id="UserCountry_getCountry"', $result);
+    }
+
+    public function test_generateReport_throwsIfMultiplePeriodsRequested()
+    {
+        $this->expectException(\Piwik\Http\BadRequestException::class);
+        $this->expectExceptionMessage('This API method does not support multiple periods.');
+
+        $idReport = APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+                'UserCountry_getCountry',
+                'Referrers_getWebsites',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY)
+        );
+
+        APIScheduledReports::getInstance()->generateReport($idReport, '2012-03-03,2012-03-23',
+            $language = false, $outputType = APIScheduledReports::OUTPUT_RETURN);
+    }
+
+    public function test_generateReport_throwsIfInvalidDateRequested(): void
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('General_ExceptionInvalidDateFormat');
+
+        $idReport = APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            [
+                'VisitsSummary_get',
+            ],
+            [
+                ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY
+            ]
+        );
+
+        APIScheduledReports::getInstance()->generateReport(
+            $idReport,
+            'DoesNotParse',
+            false,
+            APIScheduledReports::OUTPUT_RETURN
+        );
+    }
+
+    public function test_generateReport_throwsIfInvalidReportRequested(): void
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage("Requested report couldn't be found.");
+
+        APIScheduledReports::getInstance()->generateReport(
+            1234567890,
+            Date::factory('now')->toString(),
+            false,
+            APIScheduledReports::OUTPUT_RETURN
+        );
+    }
+
+    public function test_addReport_validatesEvolutionPeriodForParam()
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Invalid evolutionPeriodFor value');
+
+        self::setSuperUser();
+
+        APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+                'UserCountry_getCountry',
+                'Referrers_getWebsites',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY),
+            false,
+            'garbage'
+        );
+    }
+
+    public function testAddReportValidatesPeriodParam()
+    {
+        $invalidPeriod = 'tomorrow';
+
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage(
+            'Report period must be one of the following: day, week, month, year (got ' . $invalidPeriod . ')'
+        );
+
+        self::setSuperUser();
+
+        APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            [
+                'VisitsSummary_get',
+                'UserCountry_getCountry',
+                'Referrers_getWebsites',
+            ],
+            [ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY],
+            false,
+            'each',
+            null,
+            $invalidPeriod
+        );
+    }
+
+    public function test_addReport_validatesEvolutionPeriodNParam()
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Evolution period amount must be a positive number');
+
+        self::setSuperUser();
+
+        APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+                'UserCountry_getCountry',
+                'Referrers_getWebsites',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY),
+            false,
+            'prev',
+            -5
+        );
+    }
+
+    public function test_addReport_throwsIfEvolutionPeriodNParamIsEach_AndLastNSupplied()
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('The evolutionPeriodN param has no effect when evolutionPeriodFor is "each".');
+
+        self::setSuperUser();
+
+        APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+                'UserCountry_getCountry',
+                'Referrers_getWebsites',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY),
+            false,
+            'each',
+            5
+        );
+    }
+
+    public function testUpdateReportValidatesPeriodParam()
+    {
+        $invalidPeriod = 'tomorrow';
+
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage(
+            'Report period must be one of the following: day, week, month, year (got ' . $invalidPeriod . ')'
+        );
+
+        self::setSuperUser();
+
+        $idReport = APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            [
+                'VisitsSummary_get',
+            ],
+            [ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY]
+        );
+
+        APIScheduledReports::getInstance()->updateReport(
+            $idReport,
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            [
+                'VisitsSummary_get',
+                'UserCountry_getCountry',
+                'Referrers_getWebsites',
+            ],
+            [ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY],
+            false,
+            'each',
+            null,
+            $invalidPeriod
+        );
+    }
+
+    public function test_updateReport_validatesEvolutionPeriodForParam()
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Invalid evolutionPeriodFor value');
+
+        self::setSuperUser();
+
+        $idReport = APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY)
+        );
+
+        APIScheduledReports::getInstance()->updateReport(
+            $idReport,
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+                'UserCountry_getCountry',
+                'Referrers_getWebsites',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY),
+            false,
+            'garbage'
+        );
+    }
+
+    public function test_updateReport_validatesEvolutionPeriodNParam()
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Evolution period amount must be a positive number');
+
+        self::setSuperUser();
+
+        $idReport = APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY)
+        );
+
+        APIScheduledReports::getInstance()->updateReport(
+            $idReport,
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+                'UserCountry_getCountry',
+                'Referrers_getWebsites',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY),
+            false,
+            'prev',
+            -5
+        );
+    }
+
+    public function test_updateReport_throwsIfEvolutionPeriodNParamIsEach_AndLastNSupplied()
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('The evolutionPeriodN param has no effect when evolutionPeriodFor is "each".');
+
+        self::setSuperUser();
+
+        $idReport = APIScheduledReports::getInstance()->addReport(
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY)
+        );
+
+        APIScheduledReports::getInstance()->updateReport(
+            $idReport,
+            1,
+            '',
+            Schedule::PERIOD_DAY,
+            0,
+            ScheduledReports::EMAIL_TYPE,
+            ReportRenderer::HTML_FORMAT,
+            array(
+                'VisitsSummary_get',
+                'UserCountry_getCountry',
+                'Referrers_getWebsites',
+            ),
+            array(ScheduledReports::DISPLAY_FORMAT_PARAMETER => ScheduledReports::DISPLAY_FORMAT_TABLES_ONLY),
+            false,
+            'each',
+            5
+        );
+    }
+
+    public function test_addReport_onlySavesUniqueEmailAddresses()
+    {
+        $data = array(
+            'idsite'      => $this->idSite,
+            'description' => 'test description"',
+            'type'        => 'email',
+            'period'      => Schedule::PERIOD_DAY,
+            'period_param' => 'month',
+            'hour'        => '4',
+            'format'      => 'pdf',
+            'reports'     => array('UserCountry_getCountry'),
+            'parameters'  => array(
+                'displayFormat'    => '1',
+                'emailMe'          => true,
+                'additionalEmails' => array('test@test.com', 'test@test.com', 't2@test.com', 'test@test.com'),
+                'evolutionGraph'   => true
+            )
+        );
+
+        self::addReport($data);
+
+        // Testing getReports without parameters
+        $tmp = APIScheduledReports::getInstance()->getReports();
+        $report = reset($tmp);
+        $additionalEmails = $report['parameters']['additionalEmails'];
+        $expectedEmails = array('test@test.com', 't2@test.com');
+        $this->assertReportsEqual($expectedEmails, $additionalEmails);
     }
 
     private function assertReportsEqual($report, $data)
     {
         foreach ($data as $key => $value) {
-            if ($key == 'description') $value = substr($value, 0, 250);
+            if ($key == 'description') {
+                $value = substr($value, 0, 250);
+            }
             $this->assertEquals($value, $report[$key], "Error for $key for report " . var_export($report, true) . " and data " . var_export($data, true));
         }
     }
@@ -504,7 +944,11 @@ class ApiTest extends IntegrationTestCase
             $data['type'],
             $data['format'],
             $data['reports'],
-            $data['parameters']
+            $data['parameters'],
+            $idSegment = false,
+            $evolutionPeriodFor = 'prev',
+            $evolutionPeriodN = null,
+            $periodParam = isset($data['period_param']) ? $data['period_param'] : null
         );
         return $idReport;
     }

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -35,8 +35,9 @@ class Menu extends \Piwik\Plugin\Menu
     function getTopMenuTranslationKey()
     {
         // if MobileMessaging is not activated, display 'Email reports'
-        if (!\Piwik\Plugin\Manager::getInstance()->isPluginActivated('MobileMessaging'))
+        if (!\Piwik\Plugin\Manager::getInstance()->isPluginActivated('MobileMessaging')) {
             return self::PDF_REPORTS_TOP_MENU_TRANSLATION_KEY;
+        }
 
         if (Piwik::isUserIsAnonymous()) {
             return self::MOBILE_MESSAGING_TOP_MENU_TRANSLATION_KEY;
@@ -72,5 +73,4 @@ class Menu extends \Piwik\Plugin\Menu
 
         return self::PDF_REPORTS_TOP_MENU_TRANSLATION_KEY;
     }
-
 }

@@ -1,15 +1,15 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Plugins\Contents\tests\System;
 
+use Piwik\Tests\Framework\Fixture;
 use Piwik\Tests\Framework\TestCase\SystemTestCase;
 use Piwik\Plugins\Contents\tests\Fixtures\TwoVisitsWithContents;
-use Piwik\Translate;
 
 /**
  * Testing Contents
@@ -27,9 +27,7 @@ class ContentsTest extends SystemTestCase
      */
     public function testApi($api, $params)
     {
-        if(self::isMysqli()) {
-            $this->markTestSkipped('Sometimes fail on MYSQLI (at random)');
-        }
+        $params['xmlFieldsToRemove'] = array('idsubdatatable');
         $this->runApiTests($api, $params);
     }
 
@@ -44,16 +42,16 @@ class ContentsTest extends SystemTestCase
         );
     }
 
-    protected function setup()
+    public function setUp(): void
     {
-        parent::setup();
-        Translate::loadAllTranslations();
+        parent::setUp();
+        Fixture::loadAllTranslations();
     }
 
-    protected function tearDown()
+    public function tearDown(): void
     {
         parent::tearDown();
-        Translate::reset();
+        Fixture::resetTranslations();
     }
 
     public function getApiForTesting()
@@ -79,7 +77,7 @@ class ContentsTest extends SystemTestCase
                 'idSite'       => $idSite1,
                 'date'         => $dateTime,
                 'periods'      => $dayPeriod,
-                'segment'      => "contentName==ImageAd,contentPiece==".urlencode('Click to download Piwik now'),
+                'segment'      => "contentName==ImageAd,contentPiece==" . urlencode('Click to download Piwik now'),
                 'setDateLastN' => false,
                 'testSuffix'   => 'contentNameOrPieceMatch')
             ),
@@ -88,7 +86,7 @@ class ContentsTest extends SystemTestCase
                 'idSite'       => $idSite1,
                 'date'         => $dateTime,
                 'periods'      => $dayPeriod,
-                'segment'      => "contentTarget==".urlencode('http://www.example.com'),
+                'segment'      => "contentTarget==" . urlencode('http://www.example.com'),
                 'setDateLastN' => false,
                 'testSuffix'   => '_contentTargetMatch')
             ),

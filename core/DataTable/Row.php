@@ -1,17 +1,20 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\DataTable;
 
 use Exception;
+use Piwik\Container\StaticContainer;
 use Piwik\DataTable;
-use Piwik\Log;
+use Piwik\Date;
 use Piwik\Metrics;
+use Piwik\Period;
+use Piwik\Log\LoggerInterface;
 
 /**
  * This is what a {@link Piwik\DataTable} is composed of.
@@ -23,14 +26,17 @@ use Piwik\Metrics;
  */
 class Row extends \ArrayObject
 {
+    const COMPARISONS_METADATA_NAME = 'comparisons';
+
     /**
      * List of columns that cannot be summed. An associative array for speed.
      *
      * @var array
      */
     private static $unsummableColumns = array(
-        'label'    => true,
-        'full_url' => true // column used w/ old Piwik versions,
+        'label' => true,
+        'full_url' => true, // column used w/ old Piwik versions,
+        'ts_archived' => true // date column used in metadata for proportional tooltips
     );
 
     // @see sumRow - implementation detail
@@ -43,6 +49,8 @@ class Row extends \ArrayObject
      * @internal
      */
     public $subtableId = null;
+
+    private $isSummaryRow = false;
 
     const COLUMNS = 0;
     const METADATA = 1;
@@ -87,9 +95,11 @@ class Row extends \ArrayObject
      */
     public function export()
     {
+        $metadataToPersist = $this->metadata;
+        unset($metadataToPersist[self::COMPARISONS_METADATA_NAME]);
         return array(
             self::COLUMNS => $this->getArrayCopy(),
-            self::METADATA => $this->metadata,
+            self::METADATA => $metadataToPersist,
             self::DATATABLE_ASSOCIATED => $this->subtableId,
         );
     }
@@ -284,7 +294,7 @@ class Row extends \ArrayObject
         if ($this->isSubtableLoaded) {
             $thisSubTable = $this->getSubtable();
         } else {
-            $this->warnIfSubtableAlreadyExists();
+            $this->warnIfSubtableAlreadyExists($subTable);
 
             $thisSubTable = new DataTable();
             $this->setSubtable($thisSubTable);
@@ -363,6 +373,16 @@ class Row extends \ArrayObject
     }
 
     /**
+     * Sets all metadata at once.
+     *
+     * @param array $metadata new metadata to set
+     */
+    public function setAllMetadata($metadata)
+    {
+        $this->metadata = $metadata;
+    }
+
+    /**
      * Deletes one metadata value or all metadata values.
      *
      * @param bool|string $name Metadata name (omit to delete entire metadata).
@@ -400,8 +420,8 @@ class Row extends \ArrayObject
      * Add many columns to this row.
      *
      * @param array $columns Name/Value pairs, e.g., `array('name' => $value , ...)`
-     * @throws Exception if any column name does not exist.
      * @return void
+     * @throws Exception if any column name does not exist.
      */
     public function addColumns($columns)
     {
@@ -453,6 +473,7 @@ class Row extends \ArrayObject
      */
     public function sumRow(Row $rowToSum, $enableCopyMetadata = true, $aggregationOperations = false)
     {
+        $operationsIsArray = is_array($aggregationOperations);
         foreach ($rowToSum as $columnToSumName => $columnToSumValue) {
             if (!$this->isSummableColumn($columnToSumName)) {
                 continue;
@@ -461,11 +482,12 @@ class Row extends \ArrayObject
             $thisColumnValue = $this->getColumn($columnToSumName);
 
             $operation = 'sum';
-            if (is_array($aggregationOperations) && isset($aggregationOperations[$columnToSumName])) {
-                if (is_string($aggregationOperations[$columnToSumName])) {
-                    $operation = strtolower($aggregationOperations[$columnToSumName]);
-                } elseif (is_callable($aggregationOperations[$columnToSumName])) {
-                    $operation = $aggregationOperations[$columnToSumName];
+            if ($operationsIsArray && isset($aggregationOperations[$columnToSumName])) {
+                $operationName = $aggregationOperations[$columnToSumName];
+                if (is_string($operationName)) {
+                    $operation = strtolower($operationName);
+                } elseif (is_callable($operationName)) {
+                    $operation = $operationName;
                 }
             }
 
@@ -478,7 +500,7 @@ class Row extends \ArrayObject
                 throw new Exception("Unknown aggregation operation for column $columnToSumName.");
             }
 
-            $newValue = $this->getColumnValuesMerged($operation, $thisColumnValue, $columnToSumValue, $this, $rowToSum);
+            $newValue = $this->getColumnValuesMerged($operation, $thisColumnValue, $columnToSumValue, $this, $rowToSum, $columnToSumName);
 
             $this->setColumn($columnToSumName, $newValue);
         }
@@ -490,7 +512,7 @@ class Row extends \ArrayObject
 
     /**
      */
-    private function getColumnValuesMerged($operation, $thisColumnValue, $columnToSumValue, $thisRow, $rowToSum)
+    private function getColumnValuesMerged($operation, $thisColumnValue, $columnToSumValue, $thisRow, $rowToSum, $columnName = null)
     {
         switch ($operation) {
             case 'skip':
@@ -509,7 +531,7 @@ class Row extends \ArrayObject
                 }
                 break;
             case 'sum':
-                $newValue = $this->sumRowArray($thisColumnValue, $columnToSumValue);
+                $newValue = $this->sumRowArray($thisColumnValue, $columnToSumValue, $columnName);
                 break;
             case 'uniquearraymerge':
                 if (is_array($thisColumnValue) && is_array($columnToSumValue)) {
@@ -549,15 +571,15 @@ class Row extends \ArrayObject
 
             if (is_array($aggregationOperations)) {
                 // we need to aggregate value before value is overwritten by maybe another row
-                foreach ($aggregationOperations as $columnn => $operation) {
-                    $thisMetadata = $this->getMetadata($columnn);
-                    $sumMetadata  = $rowToSum->getMetadata($columnn);
+                foreach ($aggregationOperations as $column => $operation) {
+                    $thisMetadata = $this->getMetadata($column);
+                    $sumMetadata = $rowToSum->getMetadata($column);
 
                     if ($thisMetadata === false && $sumMetadata === false) {
                         continue;
                     }
 
-                    $aggregatedMetadata[$columnn] = $this->getColumnValuesMerged($operation, $thisMetadata, $sumMetadata, $this, $rowToSum);
+                    $aggregatedMetadata[$column] = $this->getColumnValuesMerged($operation, $thisMetadata, $sumMetadata, $this, $rowToSum, $column);
                 }
             }
 
@@ -580,14 +602,42 @@ class Row extends \ArrayObject
     }
 
     /**
-     * Returns `true` if this row is the summary row, `false` if otherwise. This function
-     * depends on the label of the row, and so, is not 100% accurate.
+     * Returns `true` if this row was added to a datatable as the summary row, `false` if otherwise.
      *
      * @return bool
      */
     public function isSummaryRow()
     {
-        return $this->getColumn('label') === DataTable::LABEL_SUMMARY_ROW;
+        return $this->isSummaryRow;
+    }
+
+    public function setIsSummaryRow()
+    {
+        $this->isSummaryRow = true;
+    }
+
+    /**
+     * Returns the associated comparisons DataTable, if any.
+     *
+     * @return DataTable|null
+     */
+    public function getComparisons()
+    {
+        $dataTableId = $this->getMetadata(self::COMPARISONS_METADATA_NAME);
+        if (empty($dataTableId)) {
+            return null;
+        }
+        return Manager::getInstance()->getTable($dataTableId);
+    }
+
+    /**
+     * Associates the supplied table with this row as the comparisons table.
+     *
+     * @param DataTable $table
+     */
+    public function setComparisons(DataTable $table)
+    {
+        $this->setMetadata(self::COMPARISONS_METADATA_NAME, $table->getId());
     }
 
     /**
@@ -595,21 +645,29 @@ class Row extends \ArrayObject
      *
      * @param number|bool $thisColumnValue
      * @param number|array $columnToSumValue
+     * @param string|null $columnName for error reporting.
      *
      * @throws Exception
      * @return array|int
      */
-    protected function sumRowArray($thisColumnValue, $columnToSumValue)
+    protected function sumRowArray($thisColumnValue, $columnToSumValue, $columnName = null)
     {
+        if ($columnToSumValue === false) {
+            return $thisColumnValue;
+        }
+
         if (is_numeric($columnToSumValue)) {
             if ($thisColumnValue === false) {
                 $thisColumnValue = 0;
+            } else if (!is_numeric($thisColumnValue)) {
+                $label = $this->getColumn('label');
+                $thisColumnDescription = $this->getColumnValueDescriptionForError($thisColumnValue);
+                $columnToSumValueDescription = $this->getColumnValueDescriptionForError($columnToSumValue);
+                throw new \Exception(sprintf('Trying to sum unsupported operands for column %s in row with label = %s: %s + %s',
+                    $columnName, $label, $thisColumnDescription, $columnToSumValueDescription));
             }
-            return $thisColumnValue + $columnToSumValue;
-        }
 
-        if ($columnToSumValue === false) {
-            return $thisColumnValue;
+            return $thisColumnValue + $columnToSumValue;
         }
 
         if ($thisColumnValue === false) {
@@ -619,15 +677,18 @@ class Row extends \ArrayObject
         if (is_array($columnToSumValue)) {
             $newValue = $thisColumnValue;
             foreach ($columnToSumValue as $arrayIndex => $arrayValue) {
+                if (!is_numeric($arrayIndex) && !$this->isSummableColumn($arrayIndex)) {
+                    continue;
+                }
                 if (!isset($newValue[$arrayIndex])) {
                     $newValue[$arrayIndex] = false;
                 }
-                $newValue[$arrayIndex] = $this->sumRowArray($newValue[$arrayIndex], $arrayValue);
+                $newValue[$arrayIndex] = $this->sumRowArray($newValue[$arrayIndex], $arrayValue, $columnName);
             }
             return $newValue;
         }
 
-        $this->warnWhenSummingTwoStrings($thisColumnValue, $columnToSumValue);
+        $this->warnWhenSummingTwoStrings($thisColumnValue, $columnToSumValue, $columnName);
 
         return 0;
     }
@@ -700,7 +761,7 @@ class Row extends \ArrayObject
         // or both have a value
         if (!(is_null($row1->getIdSubDataTable())
             && is_null($row2->getIdSubDataTable())
-        )
+            )
         ) {
             $subtable1 = $row1->getSubtable();
             $subtable2 = $row2->getSubtable();
@@ -711,27 +772,82 @@ class Row extends \ArrayObject
         return true;
     }
 
-    private function warnIfSubtableAlreadyExists()
+    private function warnIfSubtableAlreadyExists(DataTable $subTable)
     {
         if (!is_null($this->subtableId)) {
-            Log::warning(
-                "Row with label '%s' (columns = %s) has already a subtable id=%s but it was not loaded - overwriting the existing sub-table.",
-                $this->getColumn('label'),
-                implode(", ", $this->getColumns()),
-                $this->getIdSubDataTable()
-            );
+            // we only print this warning out if the row isn't a summary row, and if the period start date of the
+            // data is later than the deploy date to cloud for Matomo 4.4.1.
+            //
+            // In 4.4.1 two bugs surrounding the serialization of summary rows with subtables were fixed. Previously,
+            // if a summary row had a subtable when it was inserted into the archive table, this warning would eventually
+            // get triggered. To properly fix this corrupt data, we'd want to invalidate and reporcess it, BUT, that would
+            // require a lot of compute resources, just for the subtable of a row most people would not look at.
+            //
+            // So instead, we simply ignore this issue for data that is for periods older than the deploy date for 4.4.1. If a user
+            // wants to see this subtable data, they can invalidate a specific date and reprocess it. For newer data,
+            // since the bugs were fixed, we don't expect to see the issue. So if the warning gets triggered in this case,
+            // we log the warning in order to be notified.
+            $period = $subTable->getMetadata('period');
+            if (!$this->isSummaryRow()
+                || $this->isStartDateLaterThanCloud441DeployDate($period)
+            ) {
+                $ex = new \Exception(sprintf(
+                    "Row with label '%s' (columns = %s) has already a subtable id=%s but it was not loaded - overwriting the existing sub-table.",
+                    $this->getColumn('label'),
+                    implode(", ", $this->getColumns()),
+                    $this->getIdSubDataTable()
+                ));
+                StaticContainer::get(LoggerInterface::class)->warning("{exception}", ['exception' => $ex]);
+            }
         }
     }
 
-    protected function warnWhenSummingTwoStrings($thisColumnValue, $columnToSumValue)
+    protected function warnWhenSummingTwoStrings($thisColumnValue, $columnToSumValue, $columnName = null)
     {
         if (is_string($columnToSumValue)) {
-            Log::warning(
-                "Trying to add two strings in DataTable\Row::sumRowArray: %s + %s for row %s",
+            $ex = new \Exception(sprintf(
+                "Trying to add two strings in DataTable\Row::sumRowArray: %s + %s for column %s in row %s",
                 $thisColumnValue,
                 $columnToSumValue,
+                $columnName,
                 $this->__toString()
-            );
+            ));
+            StaticContainer::get(LoggerInterface::class)->warning("{exception}", ['exception' => $ex]);
         }
+    }
+
+    private function getColumnValueDescriptionForError($value)
+    {
+        $result = gettype($value);
+        if (is_array($result)) {
+            $result .= ' ' . json_encode($value);
+        }
+        return $result;
+    }
+
+    private function isStartDateLaterThanCloud441DeployDate($period)
+    {
+        if (empty($period)
+            || !($period instanceof Period)
+        ) {
+            return true; // sanity check
+        }
+
+        $periodStartDate = $period->getDateStart();
+
+        $cloudDeployDate = Date::factory('2021-08-11 12:00:00'); // 2021-08-12 00:00:00 NZST
+        return $periodStartDate->isLater($cloudDeployDate);
+    }
+
+    public function sumRowWithLabelToSubtable(string $label, array $columns, ?array $aggregationOps = null): Row
+    {
+        $subtable = $this->getSubtable();
+        if (empty($subtable)) {
+            $subtable = new DataTable();
+            $subtable->setMetadata(DataTable::COLUMN_AGGREGATION_OPS_METADATA_NAME, $aggregationOps);
+            $this->setSubtable($subtable);
+        }
+
+        return $subtable->sumRowWithLabel($label, $columns, $aggregationOps);
     }
 }

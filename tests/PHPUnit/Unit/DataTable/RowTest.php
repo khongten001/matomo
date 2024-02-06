@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -14,14 +14,14 @@ use Piwik\DataTable\Row;
 /**
  * @group DataTableTest
  */
-class RowTest extends \PHPUnit_Framework_TestCase
+class RowTest extends \PHPUnit\Framework\TestCase
 {
     /**
      * @var Row
      */
     private $row;
 
-    public function setUp()
+    public function setUp(): void
     {
         $this->row = new Row();
     }
@@ -419,6 +419,22 @@ class RowTest extends \PHPUnit_Framework_TestCase
         $this->row->sumRowMetadata($row, $aggregations);
 
         $this->assertSame(array('my_array' => $arrayValue), $this->row->getMetadata());
+    }
+
+    public function test_sumRow_throwsIfAddingUnsupportedTypes()
+    {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Trying to sum unsupported operands for column mycol in row with label = row1: array + integer');
+
+        $row1 = new Row();
+        $row1->addColumn('label', 'row1');
+        $row1->addColumn('mycol', ['a']);
+
+        $row2 = new Row();
+        $row2->addColumn('label', 'row2');
+        $row2->addColumn('mycol', 45);
+
+        $row1->sumRow($row2);
     }
 
     private function assertColumnSavesValue($expectedValue, $columnName, $valueToSet)

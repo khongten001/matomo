@@ -1,14 +1,17 @@
 <?php
+
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
+
 namespace Piwik;
 
 use Exception;
+use Piwik\Container\StaticContainer;
 use Piwik\Plugins\BulkTracking\Tracker\Requests;
 use Piwik\Plugins\PrivacyManager\Config as PrivacyManagerConfig;
 use Piwik\Tracker\Db as TrackerDb;
@@ -19,6 +22,7 @@ use Piwik\Tracker\RequestSet;
 use Piwik\Tracker\TrackerConfig;
 use Piwik\Tracker\Visit;
 use Piwik\Plugin\Manager as PluginManager;
+use Piwik\Log\LoggerInterface;
 
 /**
  * Class used by the logging script piwik.php called by the javascript tag.
@@ -43,6 +47,16 @@ class Tracker
     private $countOfLoggedRequests = 0;
     protected $isInstalled = null;
 
+    /**
+     * @var LoggerInterface
+     */
+    private $logger;
+
+    public function __construct()
+    {
+        $this->logger = StaticContainer::get(LoggerInterface::class);
+    }
+
     public function isDebugModeEnabled()
     {
         return array_key_exists('PIWIK_TRACKER_DEBUG', $GLOBALS) && $GLOBALS['PIWIK_TRACKER_DEBUG'] === true;
@@ -53,7 +67,7 @@ class Tracker
         $record = TrackerConfig::getConfigValue('record_statistics') != 0;
 
         if (!$record) {
-            Common::printDebug('Tracking is disabled in the config.ini.php via record_statistics=0');
+            $this->logger->debug('Tracking is disabled in the config.ini.php via record_statistics=0');
         }
 
         return $record && $this->isInstalled();
@@ -62,7 +76,12 @@ class Tracker
     public static function loadTrackerEnvironment()
     {
         SettingsServer::setIsTrackerApiRequest();
-        $GLOBALS['PIWIK_TRACKER_DEBUG'] = self::isDebugEnabled();
+        if (empty($GLOBALS['PIWIK_TRACKER_DEBUG'])) {
+            $GLOBALS['PIWIK_TRACKER_DEBUG'] = self::isDebugEnabled();
+        }
+        if (!empty($GLOBALS['PIWIK_TRACKER_DEBUG']) && !Common::isPhpCliMode()) {
+            Common::sendHeader('Content-Type: text/plain');
+        }
         PluginManager::getInstance()->loadTrackerPlugins();
     }
 
@@ -74,15 +93,16 @@ class Tracker
             ErrorHandler::registerErrorHandler();
             ExceptionHandler::setUp();
 
-            Common::printDebug("Debug enabled - Input parameters: ");
-            Common::printDebug(var_export($_GET + $_POST, true));
+            $this->logger->debug("Debug enabled - Input parameters: {params}", [
+                'params' => var_export($_GET + $_POST, true),
+            ]);
         }
     }
 
     public function isInstalled()
     {
         if (is_null($this->isInstalled)) {
-            $this->isInstalled = SettingsPiwik::isPiwikInstalled();
+            $this->isInstalled = SettingsPiwik::isMatomoInstalled();
         }
 
         return $this->isInstalled;
@@ -92,10 +112,22 @@ class Tracker
     {
         try {
             $this->init();
+
+            if ($this->isPreFlightCorsRequest()) {
+                Common::sendHeader('Access-Control-Allow-Methods: GET, POST');
+                Common::sendHeader('Access-Control-Allow-Headers: *');
+                Common::sendHeader('Access-Control-Allow-Origin: *');
+                Common::sendResponseCode(204);
+                $this->logger->debug("Tracker detected preflight CORS request. Skipping...");
+                return null;
+            }
+
             $handler->init($this, $requestSet);
 
             $this->track($handler, $requestSet);
         } catch (Exception $e) {
+            $this->logger->debug("Tracker encountered an exception: {ex}", [$e]);
+
             $handler->onException($this, $requestSet, $e);
         }
 
@@ -129,9 +161,11 @@ class Tracker
     public function trackRequest(Request $request)
     {
         if ($request->isEmptyRequest()) {
-            Common::printDebug("The request is empty");
+            $this->logger->debug('The request is empty');
         } else {
-            Common::printDebug("Current datetime: " . date("Y-m-d H:i:s", $request->getCurrentTimestamp()));
+            $this->logger->debug('Current datetime: {date}', [
+                'date' => date("Y-m-d H:i:s", $request->getCurrentTimestamp()),
+            ]);
 
             $visit = Visit\Factory::make();
             $visit->setRequest($request);
@@ -149,7 +183,8 @@ class Tracker
      */
     public static function initCorePiwikInTrackerMode()
     {
-        if (SettingsServer::isTrackerApiRequest()
+        if (
+            SettingsServer::isTrackerApiRequest()
             && self::$initTrackerMode === false
         ) {
             self::$initTrackerMode = true;
@@ -190,14 +225,6 @@ class Tracker
         return 0 !== $this->countOfLoggedRequests;
     }
 
-    /**
-     * @deprecated since 2.10.0 use {@link Date::getDatetimeFromTimestamp()} instead
-     */
-    public static function getDatetimeFromTimestamp($timestamp)
-    {
-        return Date::getDatetimeFromTimestamp($timestamp);
-    }
-
     public function isDatabaseConnected()
     {
         return !is_null(self::$db);
@@ -209,7 +236,9 @@ class Tracker
             try {
                 self::$db = TrackerDb::connectPiwikTrackerDb();
             } catch (Exception $e) {
-                throw new DbException($e->getMessage(), $e->getCode());
+                $code = $e->getCode();
+                // Note: PDOException might return a string as code, but we can't use this for DbException
+                throw new DbException($e->getMessage(), is_int($code) ? $code : 0);
             }
         }
 
@@ -275,7 +304,8 @@ class Tracker
         }
 
         // Tests using window_look_back_for_visitor
-        if (Common::getRequestVar('forceLargeWindowLookBackForVisitor', false, null, $args) == 1
+        if (
+            Common::getRequestVar('forceLargeWindowLookBackForVisitor', false, null, $args) == 1
             // also look for this in bulk requests (see fake_logs_replay.log)
             || strpos(json_encode($args, true), '"forceLargeWindowLookBackForVisitor":"1"') !== false
         ) {
@@ -294,11 +324,6 @@ class Tracker
             \Piwik\Tracker\Cache::deleteTrackerCache();
             Filesystem::clearPhpCaches();
         }
-
-        $pluginsDisabled = array('Provider');
-
-        // Disable provider plugin, because it is so slow to do many reverse ip lookups
-        PluginManager::getInstance()->setTrackerPluginsNotToLoad($pluginsDisabled);
     }
 
     protected function loadTrackerPlugins()
@@ -306,15 +331,21 @@ class Tracker
         try {
             $pluginManager  = PluginManager::getInstance();
             $pluginsTracker = $pluginManager->loadTrackerPlugins();
-            Common::printDebug("Loading plugins: { " . implode(", ", $pluginsTracker) . " }");
+
+            $this->logger->debug("Loading plugins: { {plugins} }", [
+                'plugins' => implode(", ", $pluginsTracker),
+            ]);
         } catch (Exception $e) {
-            Common::printDebug("ERROR: " . $e->getMessage());
+            $this->logger->error('Error loading tracker plugins: {exception}', [
+                'exception' => $e,
+            ]);
         }
     }
 
     private function handleFatalErrors()
     {
         register_shutdown_function(function () {
+            // TODO: add a log here
             $lastError = error_get_last();
             if (!empty($lastError) && $lastError['type'] == E_ERROR) {
                 Common::sendResponseCode(500);
@@ -337,6 +368,14 @@ class Tracker
         } catch (Exception $e) {
         }
 
+        return false;
+    }
+
+    public function isPreFlightCorsRequest(): bool
+    {
+        if (isset($_SERVER['REQUEST_METHOD']) && strtoupper($_SERVER['REQUEST_METHOD']) === 'OPTIONS') {
+            return !empty($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_HEADERS']) || !empty($_SERVER['HTTP_ACCESS_CONTROL_REQUEST_METHOD']);
+        }
         return false;
     }
 }

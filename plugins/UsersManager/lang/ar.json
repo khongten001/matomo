@@ -1,7 +1,6 @@
 {
     "UsersManager": {
-        "AddUser": "أضف مستخدم جديد",
-        "Alias": "اللقب",
+        "2FA": "مث",
         "AllWebsites": "كافة المواقع",
         "ApplyToAllWebsites": "تطبيق على كافة المواقع",
         "ClickHereToDeleteTheCookie": "انقر هنا لحذف الكوكيز وليتتبع Matomo زياراتك",
@@ -15,11 +14,10 @@
         "ExceptionUserDoesNotExist": "المستخدم '%s' غير موجود.",
         "ExcludeVisitsViaCookie": "استثني زياراتك باستخدام Cookies",
         "ForAnonymousUsersReportDateToLoadByDefault": "للمستخدمين المجهولين، حدد تاريخ التقرير",
-        "IfYouWouldLikeToChangeThePasswordTypeANewOne": "إذا كنت ترغب في تغيير كلمة المرور، اكتب واحدة جديدة، أو اتركها فارغة لعدم تغييرها.",
         "ManageAccess": "إدارة صلاحيات الوصول",
         "MenuAnonymousUserSettings": "إعدادات المستخدمين المجهولين",
-        "MenuUsers": "المستخدمون",
         "MenuUserSettings": "إعدادات المستخدم",
+        "MenuUsers": "المستخدمون",
         "PrivAdmin": "إشراف",
         "PrivNone": "بدون وصول",
         "PrivView": "مشاهدة",
@@ -27,15 +25,14 @@
         "ReportToLoadByDefault": "التقرير الافتراضي",
         "TheLoginScreen": "شاشة تسجيل الدخول",
         "ThereAreCurrentlyNRegisteredUsers": "يوجد حالياً %s مستخدم مسجل.",
+        "TwoFactorAuthentication": "المصادقة الثنائية",
         "TypeYourPasswordAgain": "اكتب كلمة المرور الجديدة مرة أخرى.",
         "User": "المستخدم",
+        "Username": "اسم المستخدم",
         "UsersManagement": "إدارة المستخدمين",
         "UsersManagementMainDescription": "أنشئ متسخدم جديد أو قم بتحديث مستخدم قائم. يمكنك أن تضبط صلاحياتهم بالأعلى.",
-        "WhenUsersAreNotLoggedInAndVisitPiwikTheyShouldAccess": "عندما لا يسجل المستخدمون دخولهم ويزورون Matomo،فسيمكنهم الوصول إلى",
         "YourUsernameCannotBeChanged": "لا يمكن تغيير اسم المستخدم الخاص بك.",
         "YourVisitsAreIgnoredOnDomain": "%1$s زياراتك يتم تجاهلها في Matomo%2$s %3$s(تم العثور على كوكيز التجاهل في متصفحك).",
-        "YourVisitsAreNotIgnored": "%1$s لا يتم تجاهل زياراتك في Matomo%2$s (كوكيز التجاهل غير موجودة في متصفحك).",
-        "XtoYofN": "%1$s - %2$s من %3$s",
-        "Username": "اسم المستخدم"
+        "YourVisitsAreNotIgnored": "%1$s لا يتم تجاهل زياراتك في Matomo%2$s (كوكيز التجاهل غير موجودة في متصفحك)."
     }
 }

@@ -8,8 +8,10 @@
         "BrowserVersions": "Brauseri versioonid",
         "Camera": "Kaamera",
         "CarBrowser": "Sõiduki sirvik",
+        "Software": "Tarkvara",
         "ColumnBrowser": "Veebisirvija",
         "ColumnOperatingSystem": "Operatsioonisüsteem",
+        "ColumnOperatingSystemVersion": "Operatsioonisüsteemi versioon",
         "Console": "Konsool",
         "dataTableLabelBrands": "Bränd",
         "dataTableLabelModels": "Mudel",
@@ -32,6 +34,7 @@
         "Tablet": "Tahvelarvuti",
         "TV": "Televiisor",
         "UserAgent": "Veebisirvija tüüp",
+        "MobileApp": "Mobiilirakendus",
         "WidgetBrowsers": "Külastajate veebisirvijad"
     }
 }

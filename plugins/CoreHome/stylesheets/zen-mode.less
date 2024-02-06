@@ -8,7 +8,11 @@
   }
 
   #root #secondNavBar + .pageWrap {
-    margin-left: 0;
+    width: 100%;
+  }
+
+  .bannerHeader {
+    display: none;
   }
 }
 
@@ -27,12 +31,9 @@
     tr.subDataTable {
       font-weight: normal !important;
     }
-    tr.subDataTable td.label .plusMinus + .label .value {
-      font-weight: bold !important;
-    }
     tr td {
       padding-top: 10px;
-      padding-bottom: 10px;
+      padding-bottom: 9px;
     }
   }
 
@@ -41,7 +42,7 @@
   }
 
   .dataTableActions table.dataTable  {
-    td.column
+    td.column,
     th.sortable:not(.first) {
       width: 50px;
     }

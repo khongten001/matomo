@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,7 +11,6 @@ namespace Piwik\Validators;
 
 abstract class BaseValidator
 {
-
     /**
      * The method to validate a value. If the value has not an expected format, an instance of
      * {@link Piwik\Validators\Exception} should be thrown.
@@ -41,7 +40,7 @@ abstract class BaseValidator
             try {
                 $validator->validate($value);
             } catch (\Exception $e) {
-                throw new Exception(strip_tags($name) . ': ' . $e->getMessage(), $e->getCode(), $e);
+                throw new Exception(strip_tags($name) . ': ' . $e->getMessage(), $e->getCode());
             }
         }
     }

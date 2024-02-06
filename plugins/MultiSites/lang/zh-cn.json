@@ -1,7 +1,8 @@
 {
     "MultiSites": {
         "Evolution": "趋势",
-        "TopLinkTooltip": "比较所有网站的分析数据",
-        "Pagination": "%1$s - %2$s of %3$s"
+        "LoadingWebsites": "正在加载网站",
+        "PluginDescription": "在此有用的“所有网站”仪表板中查看和比较您的所有网站和应用程序。",
+        "TopLinkTooltip": "比较所有网站的分析数据"
     }
 }

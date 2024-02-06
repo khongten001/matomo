@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -16,7 +16,9 @@ use Piwik\Piwik;
 use Piwik\Plugin;
 use Piwik\Plugins\UserCountry\LocationProvider\DefaultProvider;
 use Piwik\Plugin\Manager as PluginManager;
+use Piwik\Plugins\UserCountry\LocationProvider\DisabledProvider;
 use Piwik\Tracker\Cache;
+use Piwik\Tracker\TrackerConfig;
 
 /**
  * @see plugins/UserCountry/functions.php
@@ -144,6 +146,26 @@ abstract class LocationProvider
     abstract public function getSupportedLocationInfo();
 
     /**
+     * Renders Configuration or Setup View to be attached to the provider list
+     *
+     * @return string
+     */
+    public function renderConfiguration()
+    {
+        return '';
+    }
+
+    /**
+     * Renders SetUp Guide, which will be shown above Geolocation admin, if there is no working provider
+     *
+     * @return string
+     */
+    public function renderSetUpGuide()
+    {
+        return '';
+    }
+
+    /**
      * Method called when a provider gets activated.
      */
     public function activate()
@@ -156,6 +178,16 @@ abstract class LocationProvider
     public function isVisible()
     {
         return true;
+    }
+
+    /**
+     * Returns a message that should be shown as diagnostics warning if provider is used
+     *
+     * @return null|string
+     */
+    public function getUsageWarning(): ?string
+    {
+        return null;
     }
 
     /**
@@ -279,17 +311,19 @@ abstract class LocationProvider
             $info['statusMessage'] = $statusMessage;
             $info['location'] = $location;
             $info['isVisible'] = $provider->isVisible();
+            $info['usageWarning'] = $provider->getUsageWarning();
 
-            $allInfo[$info['order']] = $info;
+            $allInfo[$info['id']] = $info;
         }
 
-        ksort($allInfo);
+        uasort($allInfo, function ($a, $b) {
+            if ($a['order'] == $b['order']) {
+                return strcmp($a['id'], $b['id']);
+            }
+            return $a['order'] - $b['order'];
+        });
 
-        $result = array();
-        foreach ($allInfo as $info) {
-            $result[$info['id']] = $info;
-        }
-        return $result;
+        return $allInfo;
     }
 
     /**
@@ -308,7 +342,7 @@ abstract class LocationProvider
         } catch (\Exception $e) {
             $optionValue = false;
         }
-        return $optionValue === false ? DefaultProvider::ID : $optionValue;
+        return $optionValue === false ? self::getDefaultProviderId() : $optionValue;
     }
 
     /**
@@ -346,6 +380,20 @@ abstract class LocationProvider
     }
 
     /**
+     * Returns the default provider id to use
+     *
+     * @return string
+     */
+    public static function getDefaultProviderId()
+    {
+        if (!!TrackerConfig::getConfigValue('enable_default_location_provider')) {
+            return DefaultProvider::ID;
+        }
+
+        return DisabledProvider::ID;
+    }
+
+    /**
      * Returns a provider instance by ID or false if the ID is invalid or unavailable.
      *
      * @param string $providerId
@@ -358,7 +406,7 @@ abstract class LocationProvider
                 return $provider;
             }
         }
-        
+
         return null;
     }
 
@@ -498,9 +546,9 @@ abstract class LocationProvider
      */
     protected function getIpFromInfo($info)
     {
-        $ip = \Piwik\Network\IP::fromStringIP($info['ip']);
+        $ip = \Matomo\Network\IP::fromStringIP($info['ip']);
 
-        if ($ip instanceof \Piwik\Network\IPv6 && $ip->isMappedIPv4()) {
+        if ($ip instanceof \Matomo\Network\IPv6 && $ip->isMappedIPv4()) {
             return $ip->toIPv4String();
         } else {
             return $ip->toString();

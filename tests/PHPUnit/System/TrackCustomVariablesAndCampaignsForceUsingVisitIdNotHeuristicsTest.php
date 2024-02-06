@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Tests\System;
@@ -34,7 +34,7 @@ class TrackCustomVariablesAndCampaignsForceUsingVisitIdNotHeuristicsTest extends
 
     public function getApiForTesting()
     {
-        $apiToCall = array('VisitsSummary.get', 'Referrers.getCampaigns', 'Referrers.getWebsites');
+        $apiToCall = array('VisitsSummary.get', 'Referrers.getCampaigns', 'Referrers.getWebsites', 'Live.getLastVisitsDetails');
 
         return array(
             // TOTAL should be: 1 visit, 1 converted goal, 1 page view

@@ -1,14 +1,15 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Integration;
 
 use Piwik\API\Proxy;
+use Piwik\Container\StaticContainer;
 use Piwik\Plugin\Report;
 use Piwik\Plugins\ExampleReport\Reports\GetExampleReport;
 use Piwik\Plugins\Actions\Columns\ExitPageUrl;
@@ -18,7 +19,6 @@ use Piwik\Plugins\ExampleTracker\Columns\ExampleDimension;
 use Piwik\Plugins\Referrers\Columns\Keyword;
 use Piwik\Plugin\ReportsProvider;
 use Piwik\Report\ReportWidgetFactory;
-use Piwik\Translate;
 use Piwik\Plugin\Manager as PluginManager;
 use Piwik\Tests\Framework\Fixture;
 use Piwik\Tests\Framework\TestCase\IntegrationTestCase;
@@ -102,7 +102,7 @@ class ReportTest extends IntegrationTestCase
      */
     private $advancedReport;
 
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -114,11 +114,9 @@ class ReportTest extends IntegrationTestCase
         $this->disabledReport = new GetDisabledReport();
         $this->basicReport    = new GetBasicReport();
         $this->advancedReport = new GetAdvancedReport();
-
-        Proxy::unsetInstance();
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         unset($_GET['idSite']);
         parent::tearDown();
@@ -144,20 +142,19 @@ class ReportTest extends IntegrationTestCase
         $this->assertTrue($this->basicReport->isEnabled());
     }
 
-    /**
-     * @expectedException \Exception
-     * @expectedExceptionMessage General_ExceptionReportNotEnabled
-     */
     public function test_checkIsEnabled_shouldThrowAnExceptionIfReportIsNotEnabled()
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('General_ExceptionReportNotEnabled');
+
         $this->disabledReport->checkIsEnabled();
     }
 
     public function test_getCategory_shouldReturnTranslatedCategory()
     {
-        Translate::loadAllTranslations();
+        Fixture::loadAllTranslations();
         $this->assertEquals('Goals_Goals', $this->advancedReport->getCategoryId());
-        Translate::reset();
+        Fixture::resetTranslations();
     }
 
     public function test_getMetrics_shouldUseDefaultMetrics()
@@ -265,7 +262,17 @@ class ReportTest extends IntegrationTestCase
                 ),
                 'actionToLoadSubTables' => 'invalidReport',
                 'order' => 20,
-                'subcategory' => null
+                'subcategory' => null,
+                'metricTypes' => [
+                    'nb_visits' => 'number',
+                    'nb_uniq_visitors' => 'number',
+                    'nb_actions' => 'number',
+                    'nb_users' => 'number',
+                    'nb_actions_per_visit' => 'number',
+                    'avg_time_on_site' => 'duration_s',
+                    'bounce_rate' => 'percent',
+                    'conversion_rate' => 'percent',
+                ],
             )
         ), $reports);
     }
@@ -303,7 +310,13 @@ class ReportTest extends IntegrationTestCase
                 'actionToLoadSubTables' => 'GetBasicReport',
                 'constantRowsCount' => true,
                 'order' => '20',
-                'subcategory' => 'Actions_SubmenuPageTitles'
+                'subcategory' => 'Actions_SubmenuPageTitles',
+                'metricTypes' => [
+                    'nb_actions' => 'number',
+                    'nb_visits' => 'number',
+                    'conversion_rate' => 'percent',
+                    'bounce_rate' => 'percent',
+                ],
             )
         ), $reports);
     }
@@ -367,7 +380,7 @@ class ReportTest extends IntegrationTestCase
     {
         PluginManager::getInstance()->loadPlugins(array('API', 'ExampleReport'));
 
-        $proxyMock = $this->getMockBuilder('stdClass')->setMethods(array('call', '__construct'))->getMock();
+        $proxyMock = $this->getMockBuilder('stdClass')->addMethods(array('call', '__construct'))->getMock();
         $proxyMock->expects($this->once())->method('call')->with(
             '\\Piwik\\Plugins\\ExampleReport\\API', 'getExampleReport', array(
                 'idSite' => 1,
@@ -376,10 +389,11 @@ class ReportTest extends IntegrationTestCase
                 'module' => 'API',
                 'method' => 'ExampleReport.getExampleReport',
                 'format_metrics' => 'bc',
-                'serialize' => '0'
+                'serialize' => '0',
+                'compare' => '0',
             )
         )->willReturn("result");
-        Proxy::setSingletonInstance($proxyMock);
+        StaticContainer::getContainer()->set(Proxy::class, $proxyMock);
 
         $report = new GetExampleReport();
         $result = $report->fetch(array('idSite' => 1, 'date' => '2012-01-02'));
@@ -390,7 +404,7 @@ class ReportTest extends IntegrationTestCase
     {
         PluginManager::getInstance()->loadPlugins(array('API', 'Referrers'));
 
-        $proxyMock = $this->getMockBuilder('stdClass')->setMethods(array('call', '__construct'))->getMock();
+        $proxyMock = $this->getMockBuilder('stdClass')->addMethods(array('call', '__construct'))->getMock();
         $proxyMock->expects($this->once())->method('call')->with(
             '\\Piwik\\Plugins\\Referrers\\API', 'getSearchEnginesFromKeywordId', array(
                 'idSubtable' => 23,
@@ -400,10 +414,11 @@ class ReportTest extends IntegrationTestCase
                 'module' => 'API',
                 'method' => 'Referrers.getSearchEnginesFromKeywordId',
                 'format_metrics' => 'bc',
-                'serialize' => '0'
+                'serialize' => '0',
+                'compare' => '0',
             )
         )->willReturn("result");
-        Proxy::setSingletonInstance($proxyMock);
+        StaticContainer::getContainer()->set(Proxy::class, $proxyMock);
 
         $report = new \Piwik\Plugins\Referrers\Reports\GetKeywords();
         $result = $report->fetchSubtable(23, array('idSite' => 1, 'date' => '2012-01-02'));

@@ -1,18 +1,19 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Unit;
 
-use Piwik\Tests\Framework\TestCase\SystemTestCase;
 use Piwik\UrlHelper;
-use Spyc;
 
-class UrlHelperTest extends \PHPUnit_Framework_TestCase
+/**
+ * @group UrlHelperTest
+ */
+class UrlHelperTest extends \PHPUnit\Framework\TestCase
 {
     /**
      * Dataprovider for testIsUrl
@@ -29,6 +30,7 @@ class UrlHelperTest extends \PHPUnit_Framework_TestCase
             array('news://www.pi-wik.org', true),
             array('https://www.tëteâ.org', true),
             array('http://汉语/漢語.cn', true), //chinese
+            array('news://www.javascript.org', true),
 
             array('rtp://whatever.com', true),
             array('testhttp://test.com', true),
@@ -51,6 +53,14 @@ class UrlHelperTest extends \PHPUnit_Framework_TestCase
             array('http://', false),
             array(' http://', false),
             array('2fer://', false),
+            array('javascript://test.com/test', false),
+            array('javascript://alert', false),
+            array('vbscript://alert', false),
+            array('vbscript://alert', false),
+            array('data://example.com/test', false),
+            array('jaVascRipt://test.com/test', false),
+            array('VBscrIpt://alert', false),
+            array('dAtA://example.com/test', false),
         );
     }
 
@@ -61,6 +71,41 @@ class UrlHelperTest extends \PHPUnit_Framework_TestCase
     public function testIsUrl($url, $isValid)
     {
         $this->assertEquals($isValid, UrlHelper::isLookLikeUrl($url), "$url failed test");
+    }
+
+    /**
+     * @dataProvider getTestDataForIsLookLikeSafeUrl
+     */
+    public function test_isLookLikeSafeUrl($url, $isSafe)
+    {
+        $this->assertEquals($isSafe, UrlHelper::isLookLikeSafeUrl($url));
+    }
+
+    public function getTestDataForIsLookLikeSafeUrl()
+    {
+        return [
+            // valid
+            array('http://piwik.org', true),
+            array('http://www.piwik.org', true),
+            array('https://piwik.org', true),
+            array('https://piwik.org/dir/dir2/?oeajkgea7aega=&ge=a', true),
+            array('tel:12345', true),
+            array('sms:456543', true),
+
+            // invalid
+            array('rtp://whatever.com', false),
+            array('testhttp://test.com', false),
+            array('cylon://3.hmn', false),
+            array('://something.com', false),
+            array('data://example.com/test', false),
+            array('jaVascRipt://test.com/test', false),
+            array('VBscrIpt://alert', false),
+            array('dAtA://example.com/test', false),
+            array('data://tel.org/http', false),
+            array('smstest:456543', false),
+            array(urldecode('javascript://%0D%0Aalert(1)'), false),
+            array(urldecode('http://%0D%0Aalert(1)'), false),
+        ];
     }
 
     /**
@@ -122,6 +167,26 @@ class UrlHelperTest extends \PHPUnit_Framework_TestCase
     public function testGetPathAndQueryFromUrl()
     {
         $this->assertEquals('test/index.php?module=CoreHome', UrlHelper::getPathAndQueryFromUrl('http://piwik.org/test/index.php?module=CoreHome'));
+
+        // Add parameters to existing params
+        $this->assertEquals('test/index.php?module=CoreHome&abc=123&def=456',
+            UrlHelper::getPathAndQueryFromUrl('http://piwik.org/test/index.php?module=CoreHome', ['abc' => '123', 'def' => '456']));
+
+        // Add parameters with no existing params
+        $this->assertEquals('test/index.php?abc=123&def=456',
+            UrlHelper::getPathAndQueryFromUrl('http://piwik.org/test/index.php', ['abc' => '123', 'def' => '456']));
+
+        // Preserve anchor
+        $this->assertEquals('test/index.php#anchor',
+            UrlHelper::getPathAndQueryFromUrl('http://piwik.org/test/index.php#anchor', [], true));
+
+        // Do not preserve anchor
+        $this->assertEquals('test/index.php',
+            UrlHelper::getPathAndQueryFromUrl('http://piwik.org/test/index.php#anchor', [], false));
+
+        // Add parameters with existing params, preserve anchor
+        $this->assertEquals('test/index.php#anchor?abc=123&def=456',
+            UrlHelper::getPathAndQueryFromUrl('http://piwik.org/test/index.php#anchor', ['abc' => '123', 'def' => '456'], true));
     }
 
     /**
@@ -193,7 +258,6 @@ class UrlHelperTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals('localhost', UrlHelper::getHostFromUrl('//localhost/path?test=test2'));
         $this->assertEquals('example.org', UrlHelper::getHostFromUrl('//example.org/path'));
         $this->assertEquals('example.org', UrlHelper::getHostFromUrl('//example.org/path?test=test2'));
-
     }
 
     /**
@@ -234,8 +298,8 @@ class UrlHelperTest extends \PHPUnit_Framework_TestCase
         $this->assertEquals('add=foo', UrlHelper::getQueryFromUrl('/', array('add' => 'foo')));
         $this->assertEquals('add[]=foo&add[]=test', UrlHelper::getQueryFromUrl('/', array('add' => array('foo', 'test'))));
     }
-    
-    
+
+
     /**
      * Dataprovider for testGetQueryStringWithExcludedParameters
      */
@@ -244,47 +308,47 @@ class UrlHelperTest extends \PHPUnit_Framework_TestCase
         return array(
             array(
                 'p1=v1&p2=v2',                      //expected
-                array('p1'=>'v1', 'p2'=>'v2'),      //queryParameters
+                array('p1' => 'v1', 'p2' => 'v2'),      //queryParameters
                 array()                             //parametersToExclude
             ),
             array(
-                'p2=v2', 
-                array('p1'=>'v1', 'p2'=>'v2'),
+                'p2=v2',
+                array('p1' => 'v1', 'p2' => 'v2'),
                 array('p1')
             ),
             array(
-                'p1=v1&p2=v2', 
-                array('p1'=>'v1', 'p2'=>'v2', 'sessionId'=>'HHSJHERTG'),
+                'p1=v1&p2=v2',
+                array('p1' => 'v1', 'p2' => 'v2', 'sessionId' => 'HHSJHERTG'),
                 array('sessionId')
             ),
             array(
-                'p1=v1&p2=v2', 
-                array('p1'=>'v1', 'p2'=>'v2', 'sessionId'=>'HHSJHERTG'),
+                'p1=v1&p2=v2',
+                array('p1' => 'v1', 'p2' => 'v2', 'sessionId' => 'HHSJHERTG'),
                 array('/session/')
             ),
             array(
-                'p1=v1&p2=v2', 
-                array('p1'=>'v1', 'sessionId'=>'HHSJHERTG', 'p2'=>'v2', 'token'=>'RYUN36HSAO'),
+                'p1=v1&p2=v2',
+                array('p1' => 'v1', 'sessionId' => 'HHSJHERTG', 'p2' => 'v2', 'token' => 'RYUN36HSAO'),
                 array('/[session|token]/')
             ),
             array(
-                '', 
-                array('p1'=>'v1', 'p2'=>'v2', 'sessionId'=>'HHSJHERTG', 'token'=>'RYUN36HSAO'),
+                '',
+                array('p1' => 'v1', 'p2' => 'v2', 'sessionId' => 'HHSJHERTG', 'token' => 'RYUN36HSAO'),
                 array('/.*/')
             ),
             array(
-                'p2=v2&p4=v4', 
-                array('p1'=>'v1', 'p2'=>'v2', 'p3'=>'v3', 'p4'=>'v4'),
+                'p2=v2&p4=v4',
+                array('p1' => 'v1', 'p2' => 'v2', 'p3' => 'v3', 'p4' => 'v4'),
                 array('/p[1|3]/')
             ),
             array(
-                'p2=v2&p4=v4', 
-                array('p1'=>'v1', 'p2'=>'v2', 'p3'=>'v3', 'p4'=>'v4', 'utm_source'=>'gekko', 'utm_medium'=>'email', 'utm_campaign'=>'daily'),
+                'p2=v2&p4=v4',
+                array('p1' => 'v1', 'p2' => 'v2', 'p3' => 'v3', 'p4' => 'v4', 'utm_source' => 'gekko', 'utm_medium' => 'email', 'utm_campaign' => 'daily'),
                 array('/p[1|3]/', '/utm_/')
             )
         );
     }
-    
+
     /**
      * @dataProvider getQueryParameters
      * @group Core
@@ -293,5 +357,4 @@ class UrlHelperTest extends \PHPUnit_Framework_TestCase
     {
         $this->assertEquals($expected, UrlHelper::getQueryStringWithExcludedParameters($queryParameters, $parametersToExclude));
     }
-    
 }

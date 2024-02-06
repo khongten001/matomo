@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -25,6 +25,10 @@ class Mysqli extends Zend_Db_Adapter_Mysqli implements AdapterInterface
      *
      * @param array|Zend_Config $config database configuration
      */
+
+    // this is used for indicate TransactionLevel Cache
+    public $supportsUncommitted;
+
     public function __construct($config)
     {
         // Enable LOAD DATA INFILE
@@ -77,6 +81,11 @@ class Mysqli extends Zend_Db_Adapter_Mysqli implements AdapterInterface
         if ($this->_connection) {
             return;
         }
+
+        // The default error reporting of mysqli changed in PHP 8.1. To circumvent problems in our error handling we set
+        // the erroring reporting to the default that was used prior PHP 8.1
+        // See https://php.watch/versions/8.1/mysqli-error-mode for more details
+        mysqli_report(MYSQLI_REPORT_OFF);
 
         parent::_connect();
 
@@ -185,14 +194,26 @@ class Mysqli extends Zend_Db_Adapter_Mysqli implements AdapterInterface
      */
     public function isErrNo($e, $errno)
     {
-        if (is_null($this->_connection)) {
+        return self::isMysqliErrorNumber($e, $this->_connection, $errno);
+    }
+
+    /**
+     * Test error number
+     *
+     * @param Exception $e
+     * @param string $errno
+     * @return bool
+     */
+    public static function isMysqliErrorNumber($e, $connection, $errno)
+    {
+        if (is_null($connection)) {
             if (preg_match('/(?:\[|\s)([0-9]{4})(?:\]|\s)/', $e->getMessage(), $match)) {
                 return $match[1] == $errno;
             }
             return mysqli_connect_errno() == $errno;
         }
 
-        return mysqli_errno($this->_connection) == $errno;
+        return mysqli_errno($connection) == $errno;
     }
 
     /**
@@ -214,16 +235,6 @@ class Mysqli extends Zend_Db_Adapter_Mysqli implements AdapterInterface
         return $rowsAffected;
     }
 
-    /**
-     * Is the connection character set equal to utf8?
-     *
-     * @return bool
-     */
-    public function isConnectionUTF8()
-    {
-        $charset = mysqli_character_set_name($this->_connection);
-        return $charset === 'utf8';
-    }
 
     /**
      * Get client version

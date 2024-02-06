@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,7 +11,6 @@ namespace Piwik\Plugins\Insights;
 use Piwik\API\Request;
 use Piwik\Common;
 use Piwik\Piwik;
-use Piwik\Plugins\Insights\Visualizations\Insight;
 use Piwik\View;
 
 /**
@@ -19,12 +18,12 @@ use Piwik\View;
  */
 class Controller extends \Piwik\Plugin\Controller
 {
-
     public function __construct()
     {
-        $idSite = Common::getRequestVar('idSite', null, 'int');
+        parent::__construct();
 
-        Piwik::checkUserHasViewAccess($idSite);
+        $this->checkSitePermission();
+        Piwik::checkUserHasViewAccess($this->idSite);
     }
 
     public function getInsightsOverview()
@@ -68,12 +67,11 @@ class Controller extends \Piwik\Plugin\Controller
             return;
         }
 
-        $idSite  = Common::getRequestVar('idSite', null, 'int');
         $period  = Common::getRequestVar('period', null, 'string');
         $date    = Common::getRequestVar('date', null, 'string');
         $segment = Request::getRawSegmentFromRequest();
 
-        return API::getInstance()->$apiReport($idSite, $period, $date, $segment);
+        return API::getInstance()->$apiReport($this->idSite, $period, $date, $segment);
     }
 
     private function canGenerateInsights()

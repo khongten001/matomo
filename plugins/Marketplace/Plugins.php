@@ -1,13 +1,14 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\Marketplace;
 
+use Piwik\Container\StaticContainer;
 use Piwik\Date;
 use Piwik\ProfessionalServices\Advertising;
 use Piwik\Plugin\Dependency as PluginDependency;
@@ -172,11 +173,15 @@ class Plugins
     }
 
     /**
-     * @param bool $themesOnly
-     * @return array
+     * @return array (pluginName => pluginDetails)
      */
-    public function getPluginsHavingUpdate()
+    public function getPluginsHavingUpdate(): array
     {
+        $skipPluginUpdateCheck = StaticContainer::get('dev.disable_plugin_update_checks');
+        if ($skipPluginUpdateCheck) {
+            return [];
+        }
+
         $this->pluginManager->loadAllPluginsAndGetTheirInfo();
         $loadedPlugins = $this->pluginManager->getLoadedPlugins();
 
@@ -186,23 +191,23 @@ class Plugins
             $pluginsHavingUpdate = array();
         }
 
-        foreach ($pluginsHavingUpdate as $key => $updatePlugin) {
+        foreach ($pluginsHavingUpdate as $pluginName => $updatePlugin) {
             foreach ($loadedPlugins as $loadedPlugin) {
                 if (!empty($updatePlugin['name'])
                     && $loadedPlugin->getPluginName() == $updatePlugin['name']
                 ) {
                     $updatePlugin['currentVersion'] = $loadedPlugin->getVersion();
                     $updatePlugin['isActivated'] = $this->pluginManager->isPluginActivated($updatePlugin['name']);
-                    $pluginsHavingUpdate[$key] = $this->addMissingRequirements($updatePlugin);
+                    $pluginsHavingUpdate[$pluginName] = $this->addMissingRequirements($updatePlugin);
                     break;
                 }
             }
         }
 
         // remove plugins that have updates but for some reason are not loaded
-        foreach ($pluginsHavingUpdate as $key => $updatePlugin) {
+        foreach ($pluginsHavingUpdate as $pluginName => $updatePlugin) {
             if (empty($updatePlugin['currentVersion'])) {
-                unset($pluginsHavingUpdate[$key]);
+                unset($pluginsHavingUpdate[$pluginName]);
             }
         }
 
@@ -235,7 +240,7 @@ class Plugins
             return true;
         }
 
-        return $this->pluginManager->isPluginInstalled($pluginName);
+        return $this->pluginManager->isPluginInstalled($pluginName, true);
     }
 
     private function enrichPluginInformation($plugin)
@@ -248,7 +253,8 @@ class Plugins
         $plugin['isActivated']  = $this->isPluginActivated($plugin['name']);
         $plugin['isInvalid']    = $this->pluginManager->isPluginThirdPartyAndBogus($plugin['name']);
         $plugin['canBeUpdated'] = $plugin['isInstalled'] && $this->hasPluginUpdate($plugin);
-        $plugin['lastUpdated'] = $this->toShortDate($plugin['lastUpdated']);
+        $plugin['lastUpdated']  = $this->toShortDate($plugin['lastUpdated']);
+        $plugin['canBePurchased'] = !$plugin['isDownloadable'] && !empty($plugin['shop']['url']);
 
         if ($plugin['isInstalled']) {
             $plugin = $this->enrichLicenseInformation($plugin);
@@ -286,6 +292,10 @@ class Plugins
 
         $plugin = $this->addMissingRequirements($plugin);
 
+        $this->addPriceFrom($plugin);
+        $this->addPluginPreviewImage($plugin);
+        $this->prettifyNumberOfDownloads($plugin);
+
         return $plugin;
     }
 
@@ -321,11 +331,14 @@ class Plugins
     }
 
     /**
+     * Determine if there are any missing requirements/dependencies for the plugin
+     *
      * @param $plugin
+     * @return array
      */
-    private function addMissingRequirements($plugin)
+    private function addMissingRequirements($plugin): array
     {
-        $plugin['missingRequirements'] = array();
+        $plugin['missingRequirements'] = [];
 
         if (empty($plugin['versions']) || !is_array($plugin['versions'])) {
             return $plugin;
@@ -343,5 +356,69 @@ class Plugins
         $plugin['missingRequirements'] = $dependency->getMissingDependencies($requires);
 
         return $plugin;
+    }
+
+    /**
+     * Find the cheapest shop variant, and if none is found specified, return the first variant.
+     *
+     * @param $plugin
+     * @return void
+     */
+    private function addPriceFrom(&$plugin): void
+    {
+        $variations = $plugin['shop']['variations'] ?? [];
+
+        if (!count($variations)) {
+            $plugin['priceFrom'] = null;
+            return;
+        }
+
+        $plugin['priceFrom'] = array_shift($variations); // use first as the default
+
+        foreach ($variations as $variation) {
+            if ($variation['cheapest'] ?? false) {
+                $plugin['priceFrom'] = $variation;
+                return;
+            }
+        }
+    }
+
+    /**
+     * If plugin is by Matomo, use a Matomo image, until plugins can provide their preview image via the marketplace.
+     * If plugin is not by Matomo, use generic preview image for now (until plugin categories are introduced).
+     *
+     * @param $plugin
+     * @return void
+     */
+    private function addPluginPreviewImage(&$plugin): void
+    {
+        $previewImage = 'generic-plugin';
+
+        if (in_array(strtolower($plugin['owner']), ['piwik', 'matomo-org'])) {
+            $previewImage = 'matomo-plugin';
+        }
+
+        $plugin['previewImage'] = 'plugins/Marketplace/images/previews/' . $previewImage . '.png';
+    }
+
+    /**
+     * Add prettified number of downloads to plugin info to shorten large numbers to 1k or 1m format.
+     *
+     * @param $plugin
+     * @return void
+     */
+    private function prettifyNumberOfDownloads(&$plugin): void
+    {
+        $num = $nice = $plugin['numDownloads'] ?? 0;
+
+        if (($num >= 1000) && ($num < 100000)) {
+            $nice = round($num / 1000, 1, PHP_ROUND_HALF_DOWN) . 'k';
+        } elseif (($num >= 100000) && ($num < 1000000)) {
+            $nice = floor($num / 100000) . 'k';
+        } elseif ($num >= 1000000) {
+            $nice = floor($num / 1000000) . 'm';
+        }
+
+        $plugin['numDownloadsPretty'] = $nice;
     }
 }

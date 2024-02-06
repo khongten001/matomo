@@ -1,7 +1,7 @@
 /*!
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 (function ($) {
@@ -39,6 +39,9 @@
             });
         };
 
+        // set login form redirect url
+        $('#login_form_redirect').val(window.location.href);
+
         // 'lost your password?' on click
         $('#login_form_nav').click(function (e) {
             e.preventDefault();
@@ -60,7 +63,7 @@
             var ajaxDone = function (response) {
                 $('.loadingPiwik').hide();
 
-                var isSuccess = response.indexOf('piwik-notification') === -1,
+                var isSuccess = response.indexOf('form-errors="null"') !== -1,
                     fadeOutIds = '.resetForm .message_container';
                 if (isSuccess) {
                     fadeOutIds += ',#reset_form,#reset_form_nav';
@@ -72,7 +75,7 @@
                     }
 
                     $('.resetForm .message_container').html(response).fadeIn(300);
-                    piwikHelper.compileAngularComponents('.resetForm .message_container');
+                    piwikHelper.compileVueEntryComponents($('.resetForm .message_container'));
                 });
             };
 

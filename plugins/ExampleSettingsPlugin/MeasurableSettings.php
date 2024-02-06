@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -61,5 +61,4 @@ class MeasurableSettings extends \Piwik\Settings\Measurable\MeasurableSettings
             $field->uiControl = FieldConfig::UI_CONTROL_TEXTAREA;
         });
     }
-
 }

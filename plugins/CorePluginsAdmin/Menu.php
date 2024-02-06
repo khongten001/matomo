@@ -1,16 +1,20 @@
 <?php
+
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
+
 namespace Piwik\Plugins\CorePluginsAdmin;
 
 use Piwik\Container\StaticContainer;
 use Piwik\Menu\MenuAdmin;
+use Piwik\Menu\MenuTop;
 use Piwik\Piwik;
+use Piwik\Plugins\CorePluginsAdmin\Model\TagManagerTeaser;
 use Piwik\Plugins\Marketplace\Marketplace;
 use Piwik\Plugins\Marketplace\Plugins;
 
@@ -32,15 +36,25 @@ class Menu extends \Piwik\Plugin\Menu
         }
     }
 
+    public function configureTopMenu(MenuTop $menu)
+    {
+        $tagManagerTeaser = new TagManagerTeaser(Piwik::getCurrentUserLogin());
+
+        if ($tagManagerTeaser->shouldShowTeaser()) {
+            $menu->addItem('Tag Manager', null, $this->urlForAction('tagManagerTeaser'));
+        }
+    }
+
     public function configureAdminMenu(MenuAdmin $menu)
     {
-        $hasSuperUserAcess    = Piwik::hasUserSuperUserAccess();
+        $hasSuperUserAccess   = Piwik::hasUserSuperUserAccess();
         $isAnonymous          = Piwik::isUserIsAnonymous();
         $isMarketplaceEnabled = Marketplace::isMarketplaceEnabled();
 
         $pluginsUpdateMessage = '';
 
-        if ($hasSuperUserAcess && $isMarketplaceEnabled && $this->marketplacePlugins) {
+        $skipPluginUpdateCheck = StaticContainer::get('dev.disable_plugin_update_checks');
+        if (!$skipPluginUpdateCheck && $hasSuperUserAccess && $isMarketplaceEnabled && $this->marketplacePlugins) {
             $pluginsHavingUpdate = $this->marketplacePlugins->getPluginsHavingUpdate();
 
             if (!empty($pluginsHavingUpdate)) {
@@ -49,14 +63,15 @@ class Menu extends \Piwik\Plugin\Menu
         }
 
         if (!$isAnonymous) {
-            $menu->addPlatformItem(null, "", $order = 7);
+            $menu->addPlatformItem('', [], 7);
         }
 
-        if ($hasSuperUserAcess) {
-            $menu->addSystemItem(Piwik::translate('General_Plugins') . $pluginsUpdateMessage,
-                $this->urlForAction('plugins', array('activated' => '')),
-                $order = 20);
+        if ($hasSuperUserAccess) {
+            $menu->addPluginItem(
+                Piwik::translate('General_ManagePlugins') . $pluginsUpdateMessage,
+                $this->urlForAction('plugins', ['activated' => '']),
+                10
+            );
         }
     }
-
 }

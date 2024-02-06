@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -17,8 +17,6 @@ use Piwik\Config;
  */
 class ActionPageview extends Action
 {
-    protected $timeGeneration = false;
-
     public function __construct(Request $request)
     {
         parent::__construct(Action::TYPE_PAGE_URL, $request);
@@ -29,8 +27,6 @@ class ActionPageview extends Action
         $actionName = $request->getParam('action_name');
         $actionName = $this->cleanupActionName($actionName);
         $this->setActionName($actionName);
-
-        $this->timeGeneration = $this->request->getPageGenerationTime();
     }
 
     protected function getActionsToLookup()
@@ -41,14 +37,9 @@ class ActionPageview extends Action
         );
     }
 
-    public function getCustomFloatValue()
-    {
-        return $this->request->getPageGenerationTime();
-    }
-
     public static function shouldHandle(Request $request)
     {
-        return true;
+        return !Action::isCustomActionRequest($request);
     }
 
     public function getIdActionUrlForEntryAndExitIds()
@@ -65,6 +56,10 @@ class ActionPageview extends Action
     {
         // get the delimiter, by default '/'; BC, we read the old action_category_delimiter first (see #1067)
         $actionCategoryDelimiter = $this->getActionCategoryDelimiter();
+
+        if ($actionCategoryDelimiter === '') {
+            return $actionName;
+        }
 
         // create an array of the categories delimited by the delimiter
         $split = explode($actionCategoryDelimiter, $actionName);
@@ -95,6 +90,6 @@ class ActionPageview extends Action
             return Config::getInstance()->General['action_category_delimiter'];
         }
 
-        return Config::getInstance()->General['action_url_category_delimiter'];
+        return Config::getInstance()->General['action_title_category_delimiter'];
     }
 }

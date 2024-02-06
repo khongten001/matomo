@@ -1,14 +1,13 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Integration\Settings\Plugin;
 
-use Piwik\Db;
 use Piwik\Settings\Plugin\UserSetting;
 use Piwik\Settings\Plugin\UserSettings;
 use Piwik\Tests\Framework\Mock\Settings\FakeUserSettings;
@@ -45,5 +44,4 @@ class UserSettingsTest extends BaseSettingsTestCase
 
         $this->assertTrue($setting instanceof UserSetting);
     }
-
 }

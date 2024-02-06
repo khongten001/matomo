@@ -1,16 +1,16 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 
 namespace Piwik\Plugins\Events;
 
+use Piwik\Piwik;
 use Piwik\Plugins\Live\VisitorDetailsAbstract;
-use Piwik\Tracker\Action;
 use Piwik\View;
 
 class VisitorDetails extends VisitorDetailsAbstract
@@ -22,8 +22,21 @@ class VisitorDetails extends VisitorDetailsAbstract
         if (!empty($action['eventType'])) {
             $action['type'] = 'event';
             $action['icon'] = 'plugins/Morpheus/images/event.png';
+            $action['iconSVG'] = 'plugins/Morpheus/images/event.svg';
+            $action['title'] = Piwik::translate('Events_Event');
+            $action['subtitle'] = Piwik::translate('Events_Category') . ': "' . $action['eventCategory'] . "'";
 
-            if (strlen($action['pageTitle']) > 0) {
+            if (!empty($action['eventName'])) {
+                $action['subtitle'] .= ', ' . Piwik::translate('General_Name') . ': "' . $action['eventName'] . '"';
+            }
+            if (!empty($action['eventAction'])) {
+                $action['subtitle'] .= ', ' . Piwik::translate('General_Action') . ': "' . $action['eventAction'] . '"';
+            }
+            if (!empty($action['eventValue'])) {
+                $action['subtitle'] .= ', ' . Piwik::translate('General_Value') . ': "' . $action['eventValue'] . '"';
+            }
+
+            if (strlen(strval($action['pageTitle'])) > 0) {
                 $action['eventName'] = $action['pageTitle'];
             }
 
@@ -52,6 +65,7 @@ class VisitorDetails extends VisitorDetailsAbstract
         }
 
         $view                 = new View('@Events/_actionEvent.twig');
+        $view->sendHeadersWhenRendering = false;
         $view->action         = $action;
         $view->previousAction = $previousAction;
         $view->visitInfo      = $visitorDetails;

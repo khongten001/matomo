@@ -43,7 +43,8 @@ class Zend_Session_Exception extends Zend_Exception
      * @see http://framework.zend.com/issues/browse/ZF-1325
      * @var string PHP Error Message
      */
-    static public $sessionStartError = null;
+    static public $sessionStartError = '';
+    static public $sessionStartWarning = '';
 
     /**
      * handleSessionStartError() - interface for set_error_handler()
@@ -53,9 +54,14 @@ class Zend_Session_Exception extends Zend_Exception
      * @param  string $errstr
      * @return void
      */
-    static public function handleSessionStartError($errno, $errstr, $errfile, $errline, $errcontext)
+    static public function handleSessionStartError($errno, $errstr, $errfile, $errline, $errcontext = '')
     {
-        self::$sessionStartError = $errfile . '(Line:' . $errline . '): Error #' . $errno . ' ' . $errstr;
+        $message = $errfile . '(Line:' . $errline . '): Error #' . $errno . ' ' . $errstr;
+        if (E_ERROR === $errno || E_CORE_ERROR === $errno || E_COMPILE_ERROR === $errno) {
+            self::$sessionStartError .= $message . ' ';
+        } else {
+            self::$sessionStartWarning .= $message . ' ';
+        }
     }
 
     /**
@@ -66,7 +72,7 @@ class Zend_Session_Exception extends Zend_Exception
      * @param  string $errstr
      * @return void
      */
-    static public function handleSilentWriteClose($errno, $errstr, $errfile, $errline, $errcontext)
+    static public function handleSilentWriteClose($errno, $errstr, $errfile, $errline, $errcontext = '')
     {
         self::$sessionStartError .= PHP_EOL . $errfile . '(Line:' . $errline . '): Error #' . $errno . ' ' . $errstr;
     }

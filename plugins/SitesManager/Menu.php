@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,7 +11,6 @@ namespace Piwik\Plugins\SitesManager;
 use Piwik\Menu\MenuAdmin;
 use Piwik\Piwik;
 use Piwik\Measurable\Type\TypeManager;
-use Piwik\Plugins\WebsiteMeasurable;
 
 class Menu extends \Piwik\Plugin\Menu
 {
@@ -27,8 +26,8 @@ class Menu extends \Piwik\Plugin\Menu
         if (Piwik::hasUserSuperUserAccess()) {
             $menu->addMeasurableItem('General_Settings', $this->urlForAction('globalSettings'), $order = 11);
         }
-        
-        if (Piwik::isUserHasSomeAdminAccess()) {
+
+        if (Piwik::isUserHasSomeAdminAccess() && SitesManager::isSitesAdminEnabled()) {
             $menu->addMeasurableItem('SitesManager_MenuManage', $this->urlForAction('index'), $order = 10);
 
             $type = $this->getFirstTypeIfOnlyOneIsInUse();
@@ -46,7 +45,6 @@ class Menu extends \Piwik\Plugin\Menu
         if (count($types) === 1) {
             // only one type is in use, use this one for the wording
             return reset($types);
-
         } else {
             // multiple types are activated, check whether only one is actually in use
             $model   = new Model();

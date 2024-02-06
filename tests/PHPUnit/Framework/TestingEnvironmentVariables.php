@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -24,9 +24,10 @@ class TestingEnvironmentVariables
         $this->reload();
     }
 
-    public function __get($key)
+    public function &__get($key)
     {
-        return isset($this->behaviorOverrideProperties[$key]) ? $this->behaviorOverrideProperties[$key] : null;
+        $result =& $this->behaviorOverrideProperties[$key];
+        return $result;
     }
 
     public function __set($key, $value)
@@ -37,6 +38,11 @@ class TestingEnvironmentVariables
     public function __isset($name)
     {
         return isset($this->behaviorOverrideProperties[$name]);
+    }
+
+    public function getProperties()
+    {
+        return $this->behaviorOverrideProperties;
     }
 
     /**
@@ -78,6 +84,11 @@ class TestingEnvironmentVariables
         $this->configOverride = $config;
     }
 
+    public function removeOverriddenConfig($group, $name)
+    {
+        unset($this->configOverride[$group][$name]);
+    }
+
     public function save()
     {
         $includePath = __DIR__ . '/../../..';
@@ -103,10 +114,11 @@ class TestingEnvironmentVariables
         $pluginManager = new PluginManager($pluginList);
 
         $disabledPlugins = $pluginList->getCorePluginsDisabledByDefault();
-        $disabledPlugins[] = 'LoginHttpAuth';
         $disabledPlugins[] = 'LoginLdap';
         $disabledPlugins[] = 'MarketingCampaignsReporting';
         $disabledPlugins[] = 'ExampleVisualization';
+        $disabledPlugins[] = 'DeviceDetectorCache';
+        $disabledPlugins[] = 'Provider';
 
         $disabledPlugins = array_diff($disabledPlugins, array(
             'DBStats', 'ExampleUI', 'ExampleCommand', 'ExampleSettingsPlugin'

@@ -1,8 +1,9 @@
 <?php
+
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -20,7 +21,9 @@ final class Version
      * The current Matomo version.
      * @var string
      */
-    const VERSION = '3.6.0-rc2';
+    const VERSION = '5.0.2';
+
+    const MAJOR_VERSION = 5;
 
     public function isStableVersion($version)
     {

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -62,7 +62,7 @@ class Updates_3_0_0_b1 extends Updates
         $updater->executeMigrations(__FILE__, $this->getMigrations($updater));
         $this->migratePluginEmailUpdateSetting();
 
-        // added .woff and woff2 whitelisted file for apache webserver
+        // added .woff and woff2 allowlisted file for apache webserver
         ServerFilesGenerator::deleteHtAccessFiles();
         ServerFilesGenerator::createHtAccessFiles();
 
@@ -134,7 +134,7 @@ class Updates_3_0_0_b1 extends Updates
         foreach ($options as $option) {
             $name = $option['option_name'];
             $pluginName = str_replace(array('Plugin_', '_Settings'), '', $name);
-            $values = @unserialize($option['option_value']);
+            $values = Common::safe_unserialize($option['option_value']);
 
             if (empty($values)) {
                 continue;
@@ -166,7 +166,7 @@ class Updates_3_0_0_b1 extends Updates
 
         // we cannot migrate existing settings as we do not know the related plugin name, but this feature
         // (measurablesettings) was not used anyway. also see https://github.com/piwik/piwik/issues/10703
-        // we make sure to recreate the table as it might not have existed for some users instead of just 
+        // we make sure to recreate the table as it might not have existed for some users instead of just
         // deleting the content of it
         $queries[] = $this->migration->db->dropTable($table);
         $queries[] = $this->migration->db->createTable($table, array(

@@ -1,29 +1,27 @@
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
  * DataTable UI class for JqplotGraph/Evolution.
  *
  * @link http://www.jqplot.com
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 (function ($, require) {
-
-    var exports = require('piwik/UI'),
-        JqplotGraphDataTable = exports.JqplotGraphDataTable,
-        JqplotGraphDataTablePrototype = JqplotGraphDataTable.prototype;
+    const exports = require('piwik/UI');
+    const JqplotGraphDataTable = exports.JqplotGraphDataTable;
+    const JqplotGraphDataTablePrototype = JqplotGraphDataTable.prototype;
 
     exports.JqplotEvolutionGraphDataTable = function (element) {
         JqplotGraphDataTable.call(this, element);
     };
 
     $.extend(exports.JqplotEvolutionGraphDataTable.prototype, JqplotGraphDataTablePrototype, {
-
         _setJqplotParameters: function (params) {
             JqplotGraphDataTablePrototype._setJqplotParameters.call(this, params);
 
-            var defaultParams = {
+            const defaultParams = {
                 axes: {
                     xaxis: {
                         pad: 1.0,
@@ -63,7 +61,7 @@
                 };
             }
 
-            var overrideParams = {
+            const overrideParams = {
                 legend: {
                     show: false
                 },
@@ -71,14 +69,14 @@
                     show: true
                 }
             };
+
             this.jqplotParams = $.extend(true, {}, defaultParams, this.jqplotParams, overrideParams);
         },
 
         _bindEvents: function () {
             JqplotGraphDataTablePrototype._bindEvents.call(this);
 
-            var self = this;
-            var lastTick = false;
+            const self = this;
 
             $('#' + this.targetDivId)
                 .on('jqplotMouseLeave', function (e, s, i, d) {
@@ -86,39 +84,108 @@
                     JqplotGraphDataTablePrototype._destroyDataPointTooltip.call(this, $(this));
                 })
                 .on('jqplotClick', function (e, s, i, d) {
-                    if (lastTick !== false && typeof self.jqplotParams.axes.xaxis.onclick != 'undefined'
-                        && typeof self.jqplotParams.axes.xaxis.onclick[lastTick] == 'string') {
-                        var url = self.jqplotParams.axes.xaxis.onclick[lastTick];
-
-                        broadcast.propagateNewPage(url);
+                    if (!self.jqplotParams.axes.xaxis.onclick ||
+                        !self._plot.plugins.piwikTicks ||
+                        typeof self._plot.plugins.piwikTicks.currentXTick !== 'number'
+                    ) {
+                        return;
                     }
+
+                    const tick = self._plot.plugins.piwikTicks.currentXTick;
+
+                    if (typeof self.jqplotParams.axes.xaxis.onclick[tick] !== 'string') {
+                        return;
+                    }
+
+                    const url = self.jqplotParams.axes.xaxis.onclick[tick];
+
+                    broadcast.propagateNewPage(url);
                 })
                 .on('jqplotPiwikTickOver', function (e, tick) {
-                    lastTick = tick;
-                    var label;
-                    if (typeof self.jqplotParams.axes.xaxis.labels != 'undefined') {
-                        label = self.jqplotParams.axes.xaxis.labels[tick];
-                    } else {
-                        label = self.jqplotParams.axes.xaxis.ticks[tick];
+                    const dataByAxis = {};
+
+                    for (let d = 0; d < self.data.length; ++d) {
+                        const valueUnformatted = self.data[d][tick];
+
+                        if (typeof valueUnformatted === 'undefined' || valueUnformatted === null) {
+                            continue;
+                        }
+
+                        const axis = self.jqplotParams.series[d]._xaxis || 'xaxis';
+
+                        if (!dataByAxis[axis]) {
+                            dataByAxis[axis] = [];
+                        }
+
+                        const value = self.formatY(valueUnformatted, d);
+                        const series = self.jqplotParams.series[d].label;
+                        const seriesColor = self.jqplotParams.seriesColors[d];
+
+                        dataByAxis[axis].push(
+                            `<span class="tooltip-series-color" style="background-color: ${seriesColor}"></span>` +
+                            `<strong>${value}</strong> ${piwikHelper.htmlEntities(series)}`
+                        );
                     }
 
-                    var text = [];
-                    for (var d = 0; d < self.data.length; d++) {
-                        var value = self.formatY(self.data[d][tick], d);
-                        var series = self.jqplotParams.series[d].label;
-                        text.push('<strong>' + value + '</strong> ' + piwikHelper.htmlEntities(series));
+                    let xAxisCount = 0;
+
+                    Object.keys(self.jqplotParams.axes).forEach(function (axis) {
+                        if (!axis.startsWith('x')) {
+                            return;
+                        }
+
+                        ++xAxisCount;
+                    });
+
+                    let content = '';
+
+                    for (let i = 0; i < xAxisCount; ++i) {
+                        const axisName = i === 0 ? 'xaxis' : `x${i + 1}axis`;
+
+                        if (!dataByAxis[axisName] || !dataByAxis[axisName].length) {
+                            continue;
+                        }
+
+                        let label;
+
+                        if (typeof self.jqplotParams.axes[axisName].labels !== 'undefined') {
+                            label = self.jqplotParams.axes[axisName].labels[tick];
+                        } else {
+                            label = self.jqplotParams.axes[axisName].ticks[tick];
+                        }
+
+                        if (typeof label === 'undefined') {
+                            // sanity check
+                            continue;
+                        }
+
+                        content += `
+                            <h3 class="evolution-tooltip-header">${piwikHelper.htmlEntities(label)}</h3>
+                            ${dataByAxis[axisName].join('<br />')}
+                        `;
                     }
-                    var content = '<h3>'+piwikHelper.htmlEntities(label)+'</h3>'+text.join('<br />');
+
+                    switch (self.jqplotParams.dataStates[tick]) {
+                        case 'incomplete':
+                            content += `<br />(${self._lang.incompletePeriod})`;
+                            break;
+
+                        case 'invalidated':
+                            content += `<br />(${self._lang.invalidatedPeriod})`;
+                            break;
+                    }
 
                     $(this).tooltip({
                         track:   true,
                         items:   'div',
                         content: content,
-                        show: false,
-                        hide: false
+                        show:    false,
+                        hide:    false
                     }).trigger('mouseover');
-                    if (typeof self.jqplotParams.axes.xaxis.onclick != 'undefined'
-                        && typeof self.jqplotParams.axes.xaxis.onclick[lastTick] == 'string') {
+
+                    if (typeof self.jqplotParams.axes.xaxis.onclick !== 'undefined' &&
+                        typeof self.jqplotParams.axes.xaxis.onclick[tick] === 'string'
+                    ) {
                         $(this).css('cursor', 'pointer');
                     }
                 });
@@ -133,10 +200,11 @@
         render: function () {
             JqplotGraphDataTablePrototype.render.call(this);
 
-            if (initializeSparklines) {
-                initializeSparklines();
+            if (!initializeSparklines) {
+                return;
             }
+
+            initializeSparklines();
         }
     });
-
 })(jQuery, require);

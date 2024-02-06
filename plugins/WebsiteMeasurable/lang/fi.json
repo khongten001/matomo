@@ -1,7 +1,7 @@
 {
     "WebsiteMeasurable": {
-        "Website": "Verkkosivu",
-        "Websites": "Verkkosivut",
-        "WebsiteDescription": "Verkkosivusto on tyypillisesti kokoelma sivuja saman verkko-osoitteen alla."
+        "Website": "Sivusto",
+        "WebsiteDescription": "Verkkosivusto koostuu sivuista, jotka ovat tyyppillisesti saman verkkotunnuksen alla.",
+        "Websites": "Sivustot"
     }
 }

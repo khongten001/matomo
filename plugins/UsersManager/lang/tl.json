@@ -1,7 +1,6 @@
 {
     "UsersManager": {
-        "AddUser": "Magdagdag ng bagong user",
-        "Alias": "Palayaw",
+        "2FA": "2FA",
         "AllWebsites": "Ang lahat ng mga website",
         "AnonymousUserHasViewAccess": "Tandaan: ang %1$s user ay may %2$s na access sa website na ito",
         "AnonymousUserHasViewAccess2": "Ang iyong ulat na pang analytics at ang mga impormasyon ng iyong mga bisita ay makikita ng publiko.",
@@ -25,15 +24,14 @@
         "ExceptionYouMustGrantSuperUserAccessFirst": "Merong dapat na hindi bababa sa isang user na mayroong Super-access. Mangyaring bigyan ng Super-access ang iba pang naunang user.",
         "ExcludeVisitsViaCookie": "Ibukod ang iyong mga pagbisita sa pamamagitan ng pag-gamit ng cookie.",
         "ForAnonymousUsersReportDateToLoadByDefault": "Para sa hindi kilalang gumagamit iulat ang petsa upang i-load ng default",
-        "IfYouWouldLikeToChangeThePasswordTypeANewOne": "Kung nais mong baguhin ang iyong passoword mag type ng bago. Kung hindi man iwan itong blangko.",
         "InjectedHostCannotChangePwd": "Ikaw ay kasalukuyang bumibisita sa isang hindi kilalang host (%1$s). Hindi mo maaaring baguhin ang iyong password hanggat hindi naayos ang problemang ito.",
         "LastSeen": "Huling nakita",
         "ManageAccess": "Pamahalaan ang access",
         "MenuAnonymousUserSettings": "Mga settings ng anonymous na user",
-        "MenuUsers": "Users",
         "MenuUserSettings": "Mga setting ng user",
-        "NoteNoAnonymousUserAccessSettingsWontBeUsed2": "Tandaan: Hindi mo maaring baguhin ang mga setting sa seksyo na ito dahil wala kang anumang website na maaaring ma-access sa pamamagitan ng anonymous user",
+        "MenuUsers": "Users",
         "NoUsersExist": "Walang pang mga gumagamit.",
+        "NoteNoAnonymousUserAccessSettingsWontBeUsed2": "Tandaan: Hindi mo maaring baguhin ang mga setting sa seksyo na ito dahil wala kang anumang website na maaaring ma-access sa pamamagitan ng anonymous user",
         "PrivAdmin": "Admin",
         "PrivNone": "Walang access",
         "PrivView": "Tingnan",
@@ -48,10 +46,8 @@
         "User": "User",
         "UsersManagement": "Pamamahala ng mga User",
         "UsersManagementMainDescription": "Lumikha ng mga bagong user o i-update ang mga mayroon nang user. Pagkatapos ay maaari mong itakda ang kanilang mga permiso sa itaas.",
-        "WhenUsersAreNotLoggedInAndVisitPiwikTheyShouldAccess": "Kung ang gumagamit ay hindi naka log-in at bumisita sa Matomo kailangan nilang mag-access",
         "YourUsernameCannotBeChanged": "Hindi maaaring mabago ang iyong username.",
         "YourVisitsAreIgnoredOnDomain": "%1$s Ang iyong bisita ay hindi na-ignore ng Matomo %2$s %3$s (ang Matomo ignore cookie ay hindi nakita sa iyong browser).",
-        "YourVisitsAreNotIgnored": "%1$s Ang iyong bisita ay hindi na-ignore ng Matomo%2$s (ang Matomo ignore cookie ay hindi nakita sa iyong browser).",
-        "XtoYofN": "%1$s - %2$s ng %3$s"
+        "YourVisitsAreNotIgnored": "%1$s Ang iyong bisita ay hindi na-ignore ng Matomo%2$s (ang Matomo ignore cookie ay hindi nakita sa iyong browser)."
     }
 }

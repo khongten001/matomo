@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,7 +11,6 @@ namespace Piwik\Plugins\DBStats;
 use Exception;
 use Piwik\Common;
 use Piwik\DataTable;
-use Piwik\Db;
 use Piwik\DbHelper;
 use Piwik\Option;
 
@@ -142,7 +141,7 @@ class MySQLMetadataProvider
     }
 
     /**
-     * Retruns table statuses for every admin table.
+     * Returns table statuses for every admin table.
      *
      * @return array An array of status arrays. See http://dev.mysql.com/doc/refman/5.5/en/show-table-status.html.
      */
@@ -191,9 +190,13 @@ class MySQLMetadataProvider
      * Utility function. Gets row count of a set of tables grouped by the 'name' column.
      * This is the implementation of the getRowCountsAndSizeBy... functions.
      */
-    private function getRowCountsByArchiveName($statuses, $getRowSizeMethod, $forceCache = false,
-                                               $otherSelects = array(), $otherDataTableColumns = array())
-    {
+    private function getRowCountsByArchiveName(
+        $statuses,
+        $getRowSizeMethod,
+        $forceCache = false,
+        $otherSelects = array(),
+        $otherDataTableColumns = array()
+    ) {
         $extraCols = '';
         if (!empty($otherSelects)) {
             $extraCols = ', ' . implode(', ', $otherSelects);

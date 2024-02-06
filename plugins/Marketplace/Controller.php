@@ -1,13 +1,14 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Plugins\Marketplace;
 
+use Exception;
 use Piwik\Common;
 use Piwik\Date;
 use Piwik\Filesystem;
@@ -19,15 +20,16 @@ use Piwik\Plugin;
 use Piwik\Plugins\CorePluginsAdmin\Controller as PluginsController;
 use Piwik\Plugins\CorePluginsAdmin\CorePluginsAdmin;
 use Piwik\Plugins\CorePluginsAdmin\PluginInstaller;
+use Piwik\Plugins\Login\PasswordVerifier;
 use Piwik\Plugins\Marketplace\Input\Mode;
 use Piwik\Plugins\Marketplace\Input\PluginName;
 use Piwik\Plugins\Marketplace\Input\PurchaseType;
 use Piwik\Plugins\Marketplace\Input\Sort;
 use Piwik\ProxyHttp;
 use Piwik\SettingsPiwik;
+use Piwik\SettingsServer;
 use Piwik\Url;
 use Piwik\View;
-use Exception;
 
 class Controller extends \Piwik\Plugin\ControllerAdmin
 {
@@ -68,8 +70,20 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
      */
     private $environment;
 
-    public function __construct(LicenseKey $licenseKey, Plugins $plugins, Api\Client $marketplaceApi, Consumer $consumer, PluginInstaller $pluginInstaller, Environment $environment)
-    {
+    /**
+     * @var PasswordVerifier
+     */
+    private $passwordVerify;
+
+    public function __construct(
+        LicenseKey $licenseKey,
+        Plugins $plugins,
+        Api\Client $marketplaceApi,
+        Consumer $consumer,
+        PluginInstaller $pluginInstaller,
+        Environment $environment,
+        PasswordVerifier $passwordVerify
+    ) {
         $this->licenseKey = $licenseKey;
         $this->plugins = $plugins;
         $this->marketplaceApi = $marketplaceApi;
@@ -77,6 +91,7 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $this->pluginInstaller = $pluginInstaller;
         $this->pluginManager = Plugin\Manager::getInstance();
         $this->environment = $environment;
+        $this->passwordVerify = $passwordVerify;
 
         parent::__construct();
     }
@@ -117,6 +132,16 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
             'subscriptions' => $subscriptions,
             'loginUrl' => $loginUrl,
             'numUsers' => $this->environment->getNumUsers()
+        ));
+    }
+
+
+    public function manageLicenseKey()
+    {
+        Piwik::checkUserHasSuperUserAccess();
+
+        return $this->renderTemplate('@Marketplace/manageLicenseKey', array(
+            'hasValidLicenseKey' => $this->licenseKey->has() && $this->consumer->isValidConsumer(),
         ));
     }
 
@@ -195,7 +220,7 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $view = $this->configureViewAndCheckPermission('@Marketplace/overview');
 
         $show  = Common::getRequestVar('show', 'plugins', 'string');
-        $query = Common::getRequestVar('query', '', 'string', $_POST);
+        $query = Common::getRequestVar('query', '', 'string');
 
         $sort = new Sort();
         $sort = $sort->getSort();
@@ -231,7 +256,7 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         if (SettingsPiwik::isAutoUpdatePossible()) {
             foreach ($paidPlugins as $paidPlugin) {
                 if ($this->canPluginBeInstalled($paidPlugin)
-                    || ($this->pluginManager->isPluginInstalled($paidPlugin['name'])
+                    || ($this->pluginManager->isPluginInstalled($paidPlugin['name'], true)
                         && !$this->pluginManager->isPluginActivated($paidPlugin['name']))) {
                     $paidPluginsToInstallAtOnce[] = $paidPlugin['name'];
                 }
@@ -274,6 +299,8 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $view->isAutoUpdatePossible = SettingsPiwik::isAutoUpdatePossible();
         $view->isAutoUpdateEnabled = SettingsPiwik::isAutoUpdateEnabled();
         $view->isPluginUploadEnabled = CorePluginsAdmin::isPluginUploadEnabled();
+        $view->uploadLimit = SettingsServer::getPostMaxUploadSize();
+        $view->inReportingMenu = (bool) Common::getRequestVar('embed', 0, 'int');
 
         return $view->render();
     }
@@ -285,92 +312,101 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $this->dieIfPluginsAdminIsDisabled();
         Plugin\ControllerAdmin::displayWarningIfConfigFileNotWritable();
 
-        Nonce::checkNonce(static::INSTALL_NONCE);
+        $params = array(
+            'module' => 'Marketplace',
+            'action' => 'installAllPaidPlugins',
+            'nonce' => Common::getRequestVar('nonce')
+        );
+        if ($this->passwordVerify->requirePasswordVerifiedRecently($params)) {
+            Nonce::checkNonce(static::INSTALL_NONCE);
 
-        $paidPlugins = $this->plugins->getAllPaidPlugins();
+            $paidPlugins = $this->plugins->getAllPaidPlugins();
 
-        $hasErrors = false;
-        foreach ($paidPlugins as $paidPlugin) {
-            if (!$this->canPluginBeInstalled($paidPlugin)) {
-                continue;
-            }
-
-            $pluginName = $paidPlugin['name'];
-
-            try {
-
-                $this->pluginInstaller->installOrUpdatePluginFromMarketplace($pluginName);
-
-            } catch (\Exception $e) {
-
-                $notification = new Notification($e->getMessage());
-                $notification->context = Notification::CONTEXT_ERROR;
-                if (method_exists($e, 'isHtmlMessage') && $e->isHtmlMessage()) {
-                    $notification->raw = true;
-                }
-                Notification\Manager::notify('Marketplace_Install' . $pluginName, $notification);
-
-                $hasErrors = true;
-            }
-        }
-
-        if ($hasErrors) {
-            Url::redirectToReferrer();
-            return;
-        }
-
-        $dependency = new Plugin\Dependency();
-
-        for ($i = 0; $i <= 10; $i++) {
-            foreach ($paidPlugins as $index => $paidPlugin) {
-                if (empty($paidPlugin)) {
+            $hasErrors = false;
+            foreach ($paidPlugins as $paidPlugin) {
+                if (!$this->canPluginBeInstalled($paidPlugin)) {
                     continue;
                 }
 
                 $pluginName = $paidPlugin['name'];
 
-                if ($this->pluginManager->isPluginActivated($pluginName)) {
-                    // we do not use unset since it might skip a plugin afterwards when removing index
-                    $paidPlugins[$index] = null;
-                    continue;
-                }
+                try {
 
-                if (!$this->pluginManager->isPluginInFilesystem($pluginName)) {
-                    $paidPlugins[$index] = null;
-                    continue;
-                }
+                    $this->pluginInstaller->installOrUpdatePluginFromMarketplace($pluginName);
+                } catch (\Exception $e) {
 
-                if (empty($paidPlugin['require'])
-                    || !$dependency->hasDependencyToDisabledPlugin($paidPlugin['require'])) {
-
-                    $paidPlugins[$index] = null;
-
-                    try {
-                        $this->pluginManager->activatePlugin($pluginName);
-                    } catch (Exception $e) {
-
-                        $hasErrors = true;
-                        $notification = new Notification($e->getMessage());
-                        $notification->context = Notification::CONTEXT_ERROR;
-                        Notification\Manager::notify('Marketplace_Install' . $pluginName, $notification);
+                    $notification          = new Notification($e->getMessage());
+                    $notification->context = Notification::CONTEXT_ERROR;
+                    if (method_exists($e, 'isHtmlMessage') && $e->isHtmlMessage()) {
+                        $notification->raw = true;
                     }
+                    Notification\Manager::notify('Marketplace_Install' . $pluginName, $notification);
+
+                    $hasErrors = true;
                 }
             }
 
-            $paidPlugins = array_filter($paidPlugins);
+            if ($hasErrors) {
+                Url::redirectToReferrer();
+                return;
+            }
+
+            $dependency = new Plugin\Dependency();
+
+            for ($i = 0; $i <= 10; $i++) {
+                foreach ($paidPlugins as $index => $paidPlugin) {
+                    if (empty($paidPlugin)) {
+                        continue;
+                    }
+
+                    $pluginName = $paidPlugin['name'];
+
+                    if ($this->pluginManager->isPluginActivated($pluginName)) {
+                        // we do not use unset since it might skip a plugin afterwards when removing index
+                        $paidPlugins[$index] = null;
+                        continue;
+                    }
+
+                    if (!$this->pluginManager->isPluginInFilesystem($pluginName)) {
+                        $paidPlugins[$index] = null;
+                        continue;
+                    }
+
+                    if (empty($paidPlugin['require'])
+                        || !$dependency->hasDependencyToDisabledPlugin($paidPlugin['require'])) {
+
+                        $paidPlugins[$index] = null;
+
+                        try {
+                            $this->pluginManager->activatePlugin($pluginName);
+                        } catch (Exception $e) {
+
+                            $hasErrors             = true;
+                            $notification          = new Notification($e->getMessage());
+                            $notification->context = Notification::CONTEXT_ERROR;
+                            Notification\Manager::notify('Marketplace_Install' . $pluginName, $notification);
+                        }
+                    }
+                }
+
+                $paidPlugins = array_filter($paidPlugins);
+            }
+
+            if ($hasErrors) {
+                $notification          = new Notification(Piwik::translate('Marketplace_OnlySomePaidPluginsInstalledAndActivated'));
+                $notification->context = Notification::CONTEXT_INFO;
+            } else {
+                $notification          = new Notification(Piwik::translate('Marketplace_AllPaidPluginsInstalledAndActivated'));
+                $notification->context = Notification::CONTEXT_SUCCESS;
+            }
+
+            Notification\Manager::notify('Marketplace_InstallAll', $notification);
+
+            Url::redirectToUrl(Url::getCurrentUrlWithoutQueryString() . Url::getCurrentQueryStringWithParametersModified([
+                    'action' => 'overview',
+                    'nonce' => null,
+                ]));
         }
-
-        if ($hasErrors) {
-            $notification = new Notification(Piwik::translate('Marketplace_OnlySomePaidPluginsInstalledAndActivated'));
-            $notification->context = Notification::CONTEXT_INFO;
-        } else {
-            $notification = new Notification(Piwik::translate('Marketplace_AllPaidPluginsInstalledAndActivated'));
-            $notification->context = Notification::CONTEXT_SUCCESS;
-        }
-
-        Notification\Manager::notify('Marketplace_InstallAll', $notification);
-
-        Url::redirectToReferrer();
     }
 
     public function updatePlugin()
@@ -381,10 +417,18 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
 
     public function installPlugin()
     {
-        $view = $this->createUpdateOrInstallView('installPlugin', static::INSTALL_NONCE);
-        $view->nonce = Nonce::getNonce(PluginsController::ACTIVATE_NONCE);
-
-        return $view->render();
+        $params = array(
+            'module' => 'Marketplace',
+            'action' => 'installPlugin',
+            'mode' => 'admin',
+            'pluginName' => Common::getRequestVar('pluginName'),
+            'nonce' => Common::getRequestVar('nonce')
+        );
+        if ($this->passwordVerify->requirePasswordVerifiedRecently($params)) {
+            $view = $this->createUpdateOrInstallView('installPlugin', static::INSTALL_NONCE);
+            $view->nonce = Nonce::getNonce(PluginsController::ACTIVATE_NONCE);
+            return $view->render();
+        }
     }
 
     private function createUpdateOrInstallView($template, $nonceName)
@@ -393,32 +437,35 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $this->dieIfPluginsAdminIsDisabled();
         $this->displayWarningIfConfigFileNotWritable();
 
-        $pluginName = $this->getPluginNameIfNonceValid($nonceName);
+        $plugins = $this->getPluginNameIfNonceValid($nonceName);
 
         $view = new View('@Marketplace/' . $template);
         $this->setBasicVariablesView($view);
         $view->errorMessage = '';
-        $view->plugin = array('name' => $pluginName);
 
-        try {
-            $this->pluginInstaller->installOrUpdatePluginFromMarketplace($pluginName);
+        $pluginInfos = [];
+        foreach ($plugins as $pluginName) {
+            $pluginInfos[] = $this->plugins->getPluginInfo($pluginName);
 
-        } catch (\Exception $e) {
+            try {
+                $this->pluginInstaller->installOrUpdatePluginFromMarketplace($pluginName);
+            } catch (\Exception $e) {
 
-            $notification = new Notification($e->getMessage());
-            $notification->context = Notification::CONTEXT_ERROR;
-            $notification->type = Notification::TYPE_PERSISTENT;
-            $notification->flags = Notification::FLAG_CLEAR;
-            if (method_exists($e, 'isHtmlMessage') && $e->isHtmlMessage()) {
-                $notification->raw = true;
+                $notification = new Notification($e->getMessage());
+                $notification->context = Notification::CONTEXT_ERROR;
+                $notification->type = Notification::TYPE_PERSISTENT;
+                $notification->flags = Notification::FLAG_CLEAR;
+                if (method_exists($e, 'isHtmlMessage') && $e->isHtmlMessage()) {
+                    $notification->raw = true;
+                }
+                Notification\Manager::notify('CorePluginsAdmin_InstallPlugin', $notification);
+
+                Url::redirectToReferrer();
+                return;
             }
-            Notification\Manager::notify('CorePluginsAdmin_InstallPlugin', $notification);
-
-            Url::redirectToReferrer();
-            return;
         }
 
-        $view->plugin = $this->plugins->getPluginInfo($pluginName);
+        $view->plugins = $pluginInfos;
 
         return $view;
     }
@@ -428,18 +475,21 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $nonce = Common::getRequestVar('nonce', null, 'string');
 
         if (!Nonce::verifyNonce($nonceName, $nonce)) {
-            throw new \Exception(Piwik::translate('General_ExceptionNonceMismatch'));
+            throw new \Exception(Piwik::translate('General_ExceptionSecurityCheckFailed'));
         }
 
         Nonce::discardNonce($nonceName);
 
         $pluginName = Common::getRequestVar('pluginName', null, 'string');
 
-        if (!$this->pluginManager->isValidPluginName($pluginName)) {
-            throw new Exception('Invalid plugin name');
+        $plugins = explode(',', $pluginName);
+        $plugins = array_map('trim', $plugins);
+        foreach ($plugins as $name) {
+            if (!$this->pluginManager->isValidPluginName($name)) {
+                throw new Exception('Invalid plugin name: ' . $name);
+            }
         }
-
-        return $pluginName;
+        return $plugins;
     }
 
     private function dieIfPluginsAdminIsDisabled()
@@ -458,7 +508,7 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
 
         $pluginName = $plugin['name'];
 
-        $isAlreadyInstalled = $this->pluginManager->isPluginInstalled($pluginName)
+        $isAlreadyInstalled = $this->pluginManager->isPluginInstalled($pluginName, true)
             || $this->pluginManager->isPluginLoaded($pluginName)
             || $this->pluginManager->isPluginActivated($pluginName);
 
@@ -472,6 +522,9 @@ class Controller extends \Piwik\Plugin\ControllerAdmin
         $view = new View($template);
         $this->setBasicVariablesView($view);
         $this->displayWarningIfConfigFileNotWritable();
+
+        $this->securityPolicy->addPolicy('img-src', '*.matomo.org');
+        $this->securityPolicy->addPolicy('default-src', '*.matomo.org');
 
         $view->errorMessage = '';
 

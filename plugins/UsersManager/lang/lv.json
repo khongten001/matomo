@@ -1,7 +1,5 @@
 {
     "UsersManager": {
-        "AddUser": "Pievienot jaunu lietotāju",
-        "Alias": "Aizstājējvārds",
         "AllWebsites": "Visas vietnes",
         "ApplyToAllWebsites": "Apstipriniet visām vietnēm",
         "ClickHereToDeleteTheCookie": "Klikšķiniet šeit, lai dzēstu sīkdatni un atļautu Matomo izsekot Jūsu pašu apmeklējumus",
@@ -16,11 +14,10 @@
         "ExceptionUserDoesNotExist": "Lietotājs '%s' neeksistē.",
         "ExcludeVisitsViaCookie": "Neiekļaut Jūsu pašu apmeklējumus izmantojot sīkdatni",
         "ForAnonymousUsersReportDateToLoadByDefault": "Atskaite, kuru ielādēt pēc noklusējuma anonīmiem lietotājiem",
-        "IfYouWouldLikeToChangeThePasswordTypeANewOne": "Ja vēlaties mainīt paroli, ievadiet jauno. Pretējā gadījumā atstājiet tukšu.",
         "ManageAccess": "Pārvaldiet pieejas",
         "MenuAnonymousUserSettings": "Anonīmu lietotāju iestatījumi",
-        "MenuUsers": "Lietotāji",
         "MenuUserSettings": "Lietotāju iestatījumi",
+        "MenuUsers": "Lietotāji",
         "PrivAdmin": "Administrēt",
         "PrivNone": "Nav pieejas",
         "PrivView": "Skatījums",
@@ -30,11 +27,10 @@
         "ThereAreCurrentlyNRegisteredUsers": "Pašlaik ir %s reģistrēti lietotāji.",
         "TypeYourPasswordAgain": "Ierakstiet savu jauno paroli atkārtoti.",
         "User": "Lietotājs",
+        "Username": "Lietotājvārds",
         "UsersManagement": "Lietotāju pārvaldīšana",
         "UsersManagementMainDescription": "Izveidojiet jaunus vai labojiet esošu lietotāju iestatījumus. Augstāk Jūs varat uzstādīt šo lietotāju pieejas atļaujas.",
-        "WhenUsersAreNotLoggedInAndVisitPiwikTheyShouldAccess": "Kad lietotāji nav pieteikušies un apmeklē Matomo, tiem rādam",
         "YourUsernameCannotBeChanged": "Jūsu lietotājvārdu nav iespējams izmainīt.",
-        "YourVisitsAreIgnoredOnDomain": "%1$sJūsu apmeklējumi tiek ignorēti %2$s %3$s (pārlūkā tika atrasta Matomo ignorēšanas sīkdatne).",
-        "Username": "Lietotājvārds"
+        "YourVisitsAreIgnoredOnDomain": "%1$sJūsu apmeklējumi tiek ignorēti %2$s %3$s (pārlūkā tika atrasta Matomo ignorēšanas sīkdatne)."
     }
 }

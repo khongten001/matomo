@@ -1,7 +1,5 @@
 {
     "UsersManager": {
-        "AddUser": "Дадаць новага карыстача",
-        "Alias": "Аліас",
         "AllWebsites": "Усе сайты",
         "ApplyToAllWebsites": "Ужыць да ўсіх сайтаў",
         "ClickHereToDeleteTheCookie": "Націсніце тут, каб выдаліць cookie і пачаць адсочванне вашых наведванняў Matomo",
@@ -15,11 +13,10 @@
         "ExceptionUserDoesNotExist": "Карыстач '%s' не існуе.",
         "ExcludeVisitsViaCookie": "Сключыць вашыя наведванні выкарыстоўваючы cookie",
         "ForAnonymousUsersReportDateToLoadByDefault": "Дата справаздачы для загрузкі па змаўчанні, для ананімных карыстальнікаў",
-        "IfYouWouldLikeToChangeThePasswordTypeANewOne": "Калі вы жадаеце змяніць пароль, то ўвядзіце новы. У адваротным выпадку пакіньце поле пустым.",
         "ManageAccess": "Кіраванне правамі дазволу",
         "MenuAnonymousUserSettings": "Ананімныя карыстацкія наладкі",
-        "MenuUsers": "Карыстачы",
         "MenuUserSettings": "Наладкі карыстальніка",
+        "MenuUsers": "Карыстачы",
         "PrivAdmin": "Адмін",
         "PrivNone": "Няма доступу",
         "PrivView": "Прагляд",
@@ -29,12 +26,11 @@
         "ThereAreCurrentlyNRegisteredUsers": "Зарэгістраваныя карыстальнікі %s.",
         "TypeYourPasswordAgain": "Калі ласка, увядзіце новы пароль яшчэ раз.",
         "User": "Карыстач",
+        "Username": "Імя карыстальніка",
         "UsersManagement": "Кіраванне карыстачамі",
         "UsersManagementMainDescription": "Стварэнне новых карыстачоў ці рэдагаванне існуючых. Таксама Вы можаце задаць правы дазволу для карыстача.",
-        "WhenUsersAreNotLoggedInAndVisitPiwikTheyShouldAccess": "Калі карыстальнікі не аўтарызаваны і наведваюць Matomo, яны павінны атрымліваць доступ да",
         "YourUsernameCannotBeChanged": "Ваша імя карыстальніка не можа быць зменена.",
         "YourVisitsAreIgnoredOnDomain": "%1$sВашы наведванні ігнаруюцца Matomo на %2$s %3$s (Matomo знайшоў ў вашым браўзэры ігнаруючыя cookie).",
-        "YourVisitsAreNotIgnored": "%1$sВашы наведванні не ігнаруюцца Matomo%2$s (Matomo не знайшоў ў вашым браўзэры ігнаруючыя cookie).",
-        "Username": "Імя карыстальніка"
+        "YourVisitsAreNotIgnored": "%1$sВашы наведванні не ігнаруюцца Matomo%2$s (Matomo не знайшоў ў вашым браўзэры ігнаруючыя cookie)."
     }
 }

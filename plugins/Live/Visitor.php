@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -12,11 +12,9 @@ use Piwik\Cache;
 use Piwik\CacheId;
 use Piwik\Config;
 use Piwik\DataTable\Filter\ColumnDelete;
-use Piwik\Date;
-use Piwik\Metrics\Formatter;
 use Piwik\Plugin;
 use Piwik\Piwik;
-use Piwik\Tracker\GoalManager;
+use Piwik\Plugins\Live\Visualizations\VisitorLog;
 
 class Visitor implements VisitorInterface
 {
@@ -37,27 +35,6 @@ class Visitor implements VisitorInterface
             $instance->setDetails($this->details);
             $instance->extendVisitorDetails($visitor);
         }
-
-        /**
-         * This event can be used to add any details to a visitor. The visitor's details are for instance used in
-         * API requests like 'Live.getVisitorProfile' and 'Live.getLastVisitDetails'. This can be useful for instance
-         * in case your plugin defines any visit dimensions and you want to add the value of your dimension to a user.
-         * It can be also useful if you want to enrich a visitor with custom fields based on other fields or if you
-         * want to change or remove any fields from the user.
-         *
-         * **Example**
-         *
-         *     Piwik::addAction('Live.getAllVisitorDetails', function (&visitor, $details) {
-         *         $visitor['userPoints'] = $details['actions'] + $details['events'] + $details['searches'];
-         *         unset($visitor['anyFieldYouWantToRemove']);
-         *     });
-         *
-         * @param array &visitor You can add or remove fields to the visitor array and it will reflected in the API output
-         * @param array $details The details array contains all visit dimensions (columns of log_visit table)
-         *
-         * @deprecated  will be removed in Piwik 4
-         */
-        Piwik::postEvent('Live.getAllVisitorDetails', array(&$visitor, $this->details));
 
         return $visitor;
     }
@@ -146,23 +123,26 @@ class Visitor implements VisitorInterface
     }
 
     /**
-     * Removes fields that are not meant to be displayed (md5 config hash)
-     * Or that the user should only access if they are Super User or admin (cookie, IP)
+     * Removes fields that the user should only access if they are Super User or admin (cookie, IP,
+     * md5 config "fingerprint" hash)
      *
      * @param array $visitorDetails
      * @return array
      */
     public static function cleanVisitorDetails($visitorDetails)
     {
-        $toUnset = array('config_id');
         if (Piwik::isUserIsAnonymous()) {
-            $toUnset[] = 'idvisitor';
-            $toUnset[] = 'user_id';
-            $toUnset[] = 'location_ip';
-        }
-        foreach ($toUnset as $keyName) {
-            if (isset($visitorDetails[$keyName])) {
-                unset($visitorDetails[$keyName]);
+            $toUnset = array(
+                'idvisitor',
+                'user_id',
+                'location_ip',
+                'config_id'
+            );
+
+            foreach ($toUnset as $keyName) {
+                if (isset($visitorDetails[$keyName])) {
+                    unset($visitorDetails[$keyName]);
+                }
             }
         }
 
@@ -288,7 +268,7 @@ class Visitor implements VisitorInterface
             $instance->filterActions($actionDetails, $visitorDetailsArray);
         }
 
-        usort($actionDetails, array('static', 'sortByServerTime'));
+        $actionDetails = self::sortActionDetails($actionDetails);
 
         $actionDetails = array_values($actionDetails);
 
@@ -300,7 +280,7 @@ class Visitor implements VisitorInterface
 
         foreach ($actionDetails as $actionIdx => &$actionDetail) {
             $actionDetail =& $actionDetails[$actionIdx];
-            $nextAction = isset($actionDetails[$actionIdx+1]) ? $actionDetails[$actionIdx+1] : null;
+            $nextAction = isset($actionDetails[$actionIdx + 1]) ? $actionDetails[$actionIdx + 1] : null;
 
             foreach ($visitorDetailsManipulators as $instance) {
                 $instance->extendActionDetails($actionDetail, $nextAction, $visitorDetailsArray);
@@ -312,23 +292,23 @@ class Visitor implements VisitorInterface
         return $visitorDetailsArray;
     }
 
-    private static function sortByServerTime($a, $b)
+    private static function sortActionDetails($actions)
     {
-        $ta = strtotime($a['serverTimePretty']);
-        $tb = strtotime($b['serverTimePretty']);
-
-        if ($ta < $tb) {
-            return -1;
-        }
-
-        if ($ta == $tb) {
-            if ($a['idlink_va'] > $b['idlink_va']) {
-               return 1;
+        usort($actions, function ($a, $b) use ($actions) {
+            $fields = array('serverTimePretty', 'idlink_va', 'type', 'title', 'url', 'pageIdAction', 'goalId');
+            foreach ($fields as $field) {
+                $sort = VisitorLog::sortByActionsOnPageColumn($a, $b, $field);
+                if ($sort !== 0) {
+                    return $sort;
+                }
             }
 
-            return -1;
-        }
+            $indexA = array_search($a, $actions);
+            $indexB = array_search($b, $actions);
 
-        return 1;
+            return $indexA > $indexB ? 1 : -1;
+        });
+
+        return $actions;
     }
 }

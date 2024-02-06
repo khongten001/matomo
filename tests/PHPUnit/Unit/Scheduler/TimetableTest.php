@@ -1,27 +1,33 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Unit\Scheduler;
 
-use Piwik\Plugin;
+use Piwik\Date;
+use Piwik\Scheduler\Task;
 use Piwik\Scheduler\Timetable;
 use Piwik\Tests\Framework\Mock\PiwikOption;
-use ReflectionProperty;
+use Piwik\Option;
 
 /**
  * @group Scheduler
  */
-class TimetableTest extends \PHPUnit_Framework_TestCase
+class TimetableTest extends \PHPUnit\Framework\TestCase
 {
     private $timetable = array(
         'CoreAdminHome.purgeOutdatedArchives' => 1355529607,
         'PrivacyManager.deleteReportData_1'   => 1322229607,
     );
+
+    public function tearDown(): void
+    {
+        self::resetPiwikOption();
+    }
 
     /**
      * Dataprovider for testGetTimetableFromOptionValue
@@ -57,8 +63,36 @@ class TimetableTest extends \PHPUnit_Framework_TestCase
 
         $timetable = new Timetable();
         $this->assertEquals($expectedTimetable, $timetable->getTimetable());
+    }
 
-        self::resetPiwikOption();
+    public function testRescheduleTaskAndRunTomorrow()
+    {
+        self::stubPiwikOption(serialize([]));
+
+        $timetable = new Timetable();
+        $task = $this->getMockBuilder(Task::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $task->method('getName')->willReturn('taskName');
+
+        $timetable->rescheduleTaskAndRunTomorrow($task);
+
+        $this->assertEquals(Date::factory('tomorrow')->getTimeStamp(), $timetable->getTimetable()[$task->getName()]);
+    }
+
+    public function testRescheduleTaskAndRunInOneHour()
+    {
+        self::stubPiwikOption(serialize([]));
+
+        $timetable = new Timetable();
+        $task = $this->getMockBuilder(Task::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $task->method('getName')->willReturn('taskName');
+
+        $timetable->rescheduleTaskAndRunInOneHour($task);
+
+        $this->assertEquals(Date::factory('now')->addHour(1)->getTimeStamp(), $timetable->getTimetable()[$task->getName()]);
     }
 
     /**
@@ -136,18 +170,11 @@ class TimetableTest extends \PHPUnit_Framework_TestCase
 
     private static function stubPiwikOption($timetable)
     {
-        self::getReflectedPiwikOptionInstance()->setValue(new PiwikOption($timetable));
+        Option::setSingletonInstance(new PiwikOption($timetable));
     }
 
     private static function resetPiwikOption()
     {
-        self::getReflectedPiwikOptionInstance()->setValue(null);
-    }
-
-    private static function getReflectedPiwikOptionInstance()
-    {
-        $piwikOptionInstance = new ReflectionProperty('Piwik\Option', 'instance');
-        $piwikOptionInstance->setAccessible(true);
-        return $piwikOptionInstance;
+        Option::setSingletonInstance(null);
     }
 }

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -18,6 +18,7 @@ class TimeSpentRefAction extends ActionDimension
     protected $columnName = 'time_spent_ref_action';
     protected $columnType = 'INTEGER(10) UNSIGNED NULL';
     protected $type = self::TYPE_DURATION_S;
+    protected $nameSingular = 'Actions_TimeSpentInReferringAction';
 
     public function onNewAction(Request $request, Visitor $visitor, Action $action)
     {

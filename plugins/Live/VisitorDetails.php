@@ -1,19 +1,22 @@
 <?php
+
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
+
 namespace Piwik\Plugins\Live;
 
 use Piwik\API\Request;
+use Piwik\Common;
 use Piwik\Config;
 use Piwik\Date;
 use Piwik\DataTable;
 use Piwik\Metrics\Formatter;
-use Piwik\Network\IPUtils;
+use Matomo\Network\IPUtils;
 use Piwik\Piwik;
 use Piwik\Site;
 use Piwik\Plugins\SitesManager\API as APISitesManager;
@@ -30,11 +33,12 @@ class VisitorDetails extends VisitorDetailsAbstract
         $currency   = $website->getCurrency();
         $currencies = APISitesManager::getInstance()->getCurrencySymbols();
 
-        $visitor += array(
+        $visitor += [
             'idSite'              => $idSite,
             'idVisit'             => $this->getIdVisit(),
             'visitIp'             => $this->getIp(),
             'visitorId'           => $this->getVisitorId(),
+            'fingerprint'         => $this->getFingerprint(),
 
             // => false are placeholders to be filled in API later
             'actionDetails'       => false,
@@ -47,7 +51,7 @@ class VisitorDetails extends VisitorDetailsAbstract
             'visitServerHour'     => $this->getVisitServerHour(),
             'lastActionTimestamp' => $this->getTimestampLastAction(),
             'lastActionDateTime'  => $this->getDateTimeLastAction(),
-        );
+        ];
 
         $visitor['siteCurrency']         = $currency;
         $visitor['siteCurrencySymbol']   = @$currencies[$visitor['siteCurrency']];
@@ -68,12 +72,19 @@ class VisitorDetails extends VisitorDetailsAbstract
 
     public function renderAction($action, $previousAction, $visitorDetails)
     {
+        if (empty($action['type'])) {
+            return;
+        }
+
         switch ($action['type']) {
             case 'ecommerceOrder':
             case 'ecommerceAbandonedCart':
                 $template = '@Live/_actionEcommerce.twig';
                 break;
             case 'goal':
+                if (empty($action['goalName'])) {
+                    return; // goal deleted
+                }
                 $template = '@Live/_actionGoal.twig';
                 break;
             case 'action':
@@ -88,7 +99,16 @@ class VisitorDetails extends VisitorDetailsAbstract
             return;
         }
 
+        $sitesModel = new \Piwik\Plugins\SitesManager\Model();
+
+        if (isset($action['type']) && in_array($action['type'], ['outlink', 'download']) && isset($action['url'])) {
+            $action['url'] = html_entity_decode($action['url'], ENT_QUOTES, "UTF-8");
+        }
+
         $view                 = new View($template);
+        $view->sendHeadersWhenRendering = false;
+        $view->mainUrl        = trim(Site::getMainUrlFor($this->getIdSite()));
+        $view->additionalUrls = $sitesModel->getAliasSiteUrlsFromId($this->getIdSite());
         $view->action         = $action;
         $view->previousAction = $previousAction;
         $view->visitInfo      = $visitorDetails;
@@ -98,6 +118,7 @@ class VisitorDetails extends VisitorDetailsAbstract
     public function renderActionTooltip($action, $visitInfo)
     {
         $view            = new View('@Live/_actionTooltip');
+        $view->sendHeadersWhenRendering = false;
         $view->action    = $action;
         $view->visitInfo = $visitInfo;
         return [[ 0, $view->render() ]];
@@ -106,6 +127,8 @@ class VisitorDetails extends VisitorDetailsAbstract
     public function renderVisitorDetails($visitorDetails)
     {
         $view            = new View('@Live/_visitorDetails.twig');
+        $view->isProfileEnabled = Live::isVisitorProfileEnabled();
+        $view->sendHeadersWhenRendering = false;
         $view->visitInfo = $visitorDetails;
         return [[ 0, $view->render() ]];
     }
@@ -113,6 +136,8 @@ class VisitorDetails extends VisitorDetailsAbstract
     public function renderIcons($visitorDetails)
     {
         $view          = new View('@Live/_visitorLogIcons.twig');
+        $view->isProfileEnabled = Live::isVisitorProfileEnabled();
+        $view->sendHeadersWhenRendering = false;
         $view->visitor = $visitorDetails;
         return $view->render();
     }
@@ -150,7 +175,15 @@ class VisitorDetails extends VisitorDetailsAbstract
 
     function getIdSite()
     {
-        return $this->details['idsite'];
+        return isset($this->details['idsite']) ? $this->details['idsite'] : Common::getRequestVar('idSite');
+    }
+
+    function getFingerprint()
+    {
+        if (isset($this->details['config_id'])) {
+            return bin2hex($this->details['config_id']);
+        }
+        return false;
     }
 
     function getTimestampLastAction()
@@ -180,19 +213,21 @@ class VisitorDetails extends VisitorDetailsAbstract
 
     public function finalizeProfile($visits, &$profile)
     {
-        $formatter                           = new Formatter();
+        $site = new Site($this->getIdSite());
+        $formatter = new Formatter();
+
         $profile['totalVisitDurationPretty'] = $formatter->getPrettyTimeFromSeconds($profile['totalVisitDuration'], true);
 
-        $rows                        = $visits->getRows();
-
+        $rows = $visits->getRows();
         $firstVisit = $profile['visit_first'];
+
         if (count($rows) >= Config::getInstance()->General['live_visitor_profile_max_visits_to_aggregate']) {
             $firstVisit = $this->fetchFirstVisit();
         }
 
         $profile['userId']           = $visits->getLastRow()->getColumn('userId');
-        $profile['firstVisit']       = $this->getVisitorProfileVisitSummary($firstVisit);
-        $profile['lastVisit']        = $this->getVisitorProfileVisitSummary($profile['visit_last']);
+        $profile['firstVisit']       = $this->getVisitorProfileVisitSummary($firstVisit, $site);
+        $profile['lastVisit']        = $this->getVisitorProfileVisitSummary($profile['visit_last'], $site);
         $profile['visitsAggregated'] = count($rows);
     }
 
@@ -217,21 +252,21 @@ class VisitorDetails extends VisitorDetailsAbstract
      * @param DataTable\Row $visit
      * @return array
      */
-    private function getVisitorProfileVisitSummary($visit)
+    private function getVisitorProfileVisitSummary($visit, Site $site): array
     {
-        $today = Date::today();
+        $today = Date::factory('today', $site->getTimezone());
+        $firstActionTimestamp = $visit->getColumn('firstActionTimestamp');
+        $firstActionDate = Date::factory($firstActionTimestamp, $site->getTimezone());
 
-        $serverDate = $visit->getColumn('firstActionTimestamp');
-        return array(
-            'date'            => $serverDate,
-            'prettyDate'      => Date::factory($serverDate)->getLocalized(Date::DATE_FORMAT_LONG),
-            'daysAgo'         => (int)Date::secondsToDays($today->getTimestamp() - Date::factory($serverDate)->getTimestamp()),
+        return [
+            'date'            => $firstActionTimestamp,
+            'prettyDate'      => $firstActionDate->getLocalized(Date::DATE_FORMAT_LONG),
+            'daysAgo'         => (int) Date::secondsToDays($today->getTimestamp() - $firstActionDate->getTimestamp()),
             'referrerType'    => $visit->getColumn('referrerType'),
             'referrerUrl'     => $visit->getColumn('referrerUrl') ?: '',
             'referralSummary' => self::getReferrerSummaryForVisit($visit),
-        );
+        ];
     }
-
 
     /**
      * Returns a summary for a visit's referral.
@@ -242,7 +277,8 @@ class VisitorDetails extends VisitorDetailsAbstract
     public static function getReferrerSummaryForVisit($visit)
     {
         $referrerType = $visit->getColumn('referrerType');
-        if ($referrerType === false
+        if (
+            $referrerType === false
             || $referrerType == 'direct'
         ) {
             return Piwik::translate('Referrers_DirectEntry');
@@ -252,7 +288,8 @@ class VisitorDetails extends VisitorDetailsAbstract
             $referrerName = $visit->getColumn('referrerName');
 
             $keyword = $visit->getColumn('referrerKeyword');
-            if ($keyword !== false
+            if (
+                $keyword !== false
                 && $keyword != APIReferrers::getKeywordNotDefinedString()
             ) {
                 $referrerName .= ' (' . $keyword . ')';
@@ -261,7 +298,6 @@ class VisitorDetails extends VisitorDetailsAbstract
         }
 
         if ($referrerType == 'campaign') {
-
             $summary = Piwik::translate('Referrers_ColumnCampaign') . ': ' . $visit->getColumn('referrerName');
             $keyword = $visit->getColumn('referrerKeyword');
             if (!empty($keyword)) {

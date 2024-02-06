@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -29,6 +29,10 @@ class Mysql extends Zend_Db_Adapter_Pdo_Mysql implements AdapterInterface
      *
      * @param array|Zend_Config $config database configuration
      */
+
+    // this is used for indicate TransactionLevel Cache
+    public $supportsUncommitted;
+
     public function __construct($config)
     {
         // Enable LOAD DATA INFILE
@@ -58,6 +62,13 @@ class Mysql extends Zend_Db_Adapter_Pdo_Mysql implements AdapterInterface
             }
         }
         parent::__construct($config);
+    }
+
+    public function closeConnection()
+    {
+        $this->cachePreparedStatement = [];
+
+        parent::closeConnection();
     }
 
     /**
@@ -93,12 +104,23 @@ class Mysql extends Zend_Db_Adapter_Pdo_Mysql implements AdapterInterface
             return;
         }
 
-        parent::_connect();
+        $sql = 'SET sql_mode = "' . Db::SQL_MODE . '"';
 
-        // MYSQL_ATTR_USE_BUFFERED_QUERY will use more memory when enabled
-        // $this->_connection->setAttribute(PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
-
-        $this->_connection->exec('SET sql_mode = "' . Db::SQL_MODE . '"');
+        try {
+            parent::_connect();
+            $this->_connection->exec($sql);
+        } catch (Exception $e) {
+            if ($this->isErrNo($e, \Piwik\Updater\Migration\Db::ERROR_CODE_MYSQL_SERVER_HAS_GONE_AWAY)) {
+                // mysql may return a MySQL server has gone away error when trying to establish the connection.
+                // in that case we want to retry establishing the connection once after a short sleep
+                $this->_connection = null; // we need to unset, otherwise parent connect won't retry
+                usleep(400 * 1000);
+                parent::_connect();
+                $this->_connection->exec($sql);
+            } else {
+                throw $e;
+            }
+        }
     }
 
     /**
@@ -209,6 +231,19 @@ class Mysql extends Zend_Db_Adapter_Pdo_Mysql implements AdapterInterface
      */
     public function isErrNo($e, $errno)
     {
+        return self::isPdoErrorNumber($e, $errno);
+    }
+
+
+    /**
+     * Test error number
+     *
+     * @param Exception $e
+     * @param string $errno
+     * @return bool
+     */
+    public static function isPdoErrorNumber($e, $errno)
+    {
         if (preg_match('/(?:\[|\s)([0-9]{4})(?:\]|\s)/', $e->getMessage(), $match)) {
             return $match[1] == $errno;
         }
@@ -230,8 +265,9 @@ class Mysql extends Zend_Db_Adapter_Pdo_Mysql implements AdapterInterface
         }
 
         $charset = $charsetInfo[0]['Value'];
-        return $charset === 'utf8';
+        return strpos($charset, 'utf8') === 0;
     }
+
 
     /**
      * Return number of affected rows in last query

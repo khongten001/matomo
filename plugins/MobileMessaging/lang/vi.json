@@ -7,6 +7,8 @@
         "MultiSites_Must_Be_Activated": "Để tạo ra các văn bản tin nhắn SMS về số liệu thống kê trang web của bạn, vui lòng kích hoạt MultiSites plugin trong Matomo.",
         "PhoneNumbers": "Các số điện thoại của bạn",
         "PluginDescription": "Tạo ra và tải về báo cáo tin nhắn SMS tùy chỉnh và họ đã gửi đến điện thoại của bạn theo hàng ngày, hàng tuần hoặc hàng tháng.",
+        "SMS_Content_Too_Long": "[quá lâu]",
+        "SettingsMenu": "Tin nhắn trên điện thoại di động",
         "Settings_APIKey": "Khóa API",
         "Settings_CountryCode": "Mã quốc gia",
         "Settings_CredentialNotProvided": "Trước khi bạn có thể tạo và quản lý các số điện thoại, hãy kết nối Matomo với tài khoản SMS của bạn ở trên.",
@@ -16,7 +18,6 @@
         "Settings_InvalidActivationCode": "Mã nhập vào không hợp lệ, hãy thử lại.",
         "Settings_LetUsersManageAPICredential": "Cho phép người dùng quản lý các thông tin tin nhắn SMS API của họ",
         "Settings_LetUsersManageAPICredential_No_Help": "Tất cả người dùng đã cho phép nhận các báo cáo SMS và sẽ sử dụng thẻ tài khoản của bạn.",
-        "Settings_LetUsersManageAPICredential_Yes_Help": "Mỗi người dùng sẽ được cho phép cài đặt tài khoản riêng SMS API của họ và sẽ không sử dụng thẻ tín dụng của bạn.",
         "Settings_ManagePhoneNumbers": "Quản lý các số điện thoại",
         "Settings_PhoneActivated": "Số điện thoại đã xác nhận! Bạn có thể nhận tin nhắn SMS ngay bây giờ với số liệu thống kê của bạn.",
         "Settings_PhoneNumber": "Số điện thoại",
@@ -29,11 +30,8 @@
         "Settings_SuspiciousPhoneNumber": "Nếu bạn không nhận được tin nhắn văn bản, bạn có thể thử ngoài hàng 0 đầu. tức là. %s",
         "Settings_UpdateOrDeleteAccount": "Bạn cũng có thể %1$s cập nhật %2$s hoặc %3$s xóa %4$s tài khoản này.",
         "Settings_ValidatePhoneNumber": "Xác nhận",
-        "Settings_VerificationCodeJustSent": "Chúng tôi đã gửi một tin nhắn SMS đến số này với một mã số: vui lòng điền mã ở trên và click \"Xác nhận\".",
-        "SettingsMenu": "Tin nhắn trên điện thoại di động",
-        "SMS_Content_Too_Long": "[quá lâu]",
         "TopLinkTooltip": "Nhận các báo cáo Web Analytics đã được gửi đến hộp thư email của bạn hoặc điện thoại di động của bạn!",
         "TopMenu": "Các báo cáo Email & SMS",
-        "VerificationText": "Mã số là %1$s. Để xác nhận số điện thoại của bạn và nhận được báo cáo SMS Matomo hãy sao chép mã này trong mẫu truy cập thông qua Matomo > %2$s> %3$s."
+        "VerificationText": "Mã số là %1$s. Để xác nhận số điện thoại của bạn và nhận được báo cáo SMS Matomo hãy sao chép mã này trong mẫu truy cập thông qua Matomo → %2$s → %3$s."
     }
 }

@@ -1,47 +1,40 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Integration;
 
 use Exception;
-use Piwik\Access;
 use Piwik\ArchiveProcessor;
 use Piwik\ArchiveProcessor\Rules;
 use Piwik\Common;
 use Piwik\DataAccess\ArchiveTableCreator;
+use Piwik\DataAccess\ArchiveWriter;
+use Piwik\DataAccess\LogAggregator;
+use Piwik\DataTable;
 use Piwik\Date;
 use Piwik\Db;
 use Piwik\Db\BatchInsert;
-use Piwik\DbHelper;
 use Piwik\Period;
 use Piwik\Piwik;
-use Piwik\Plugins\SitesManager\API;
 use Piwik\Segment;
 use Piwik\SettingsServer;
 use Piwik\Site;
+use Piwik\Tests\Framework\Fixture;
 use Piwik\Tests\Framework\Mock\FakeAccess;
 use Piwik\Tests\Framework\TestCase\IntegrationTestCase;
 
 class ArchiveProcessorTest extends ArchiveProcessor\Loader
 {
+    public $time;
+
     public function getParams()
     {
         return $this->params;
-    }
-
-    public function public_getMinTimeArchiveProcessed()
-    {
-        return $this->getMinTimeArchiveProcessed();
-    }
-
-    public function public_isArchiveTemporary()
-    {
-        return $this->isArchiveTemporary();
     }
 }
 
@@ -50,7 +43,7 @@ class ArchiveProcessorTest extends ArchiveProcessor\Loader
  */
 class ArchiveProcessingTest extends IntegrationTestCase
 {
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -60,7 +53,7 @@ class ArchiveProcessingTest extends IntegrationTestCase
         ArchiveTableCreator::$tablesAlreadyInstalled = null;
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         ArchiveTableCreator::$tablesAlreadyInstalled = null;
     }
@@ -73,15 +66,7 @@ class ArchiveProcessingTest extends IntegrationTestCase
      */
     private function _createWebsite($timezone = 'UTC')
     {
-        $idSite = API::getInstance()->addSite(
-            "site1",
-            array("http://piwik.net"),
-            $ecommerce = 0,
-            $siteSearch = 1, $searchKeywordParameters = null, $searchCategoryParameters = null,
-            $excludedIps = "",
-            $excludedQueryParameters = "",
-            $timezone);
-
+        $idSite = Fixture::createWebsite('2013-03-04', 0, false, false, 1, null, null, $timezone);
         Site::clearCache();
         return new Site($idSite);
     }
@@ -99,10 +84,58 @@ class ArchiveProcessingTest extends IntegrationTestCase
         $site = $this->_createWebsite($siteTimezone);
         $date = Date::factory($dateLabel);
         $period = Period\Factory::build($periodLabel, $date);
-        $segment = new Segment('', $site->getId());
+        $segment = new Segment('', [$site->getId()], $period->getDateTimeStart(), $period->getDateTimeEnd());
 
         $params = new ArchiveProcessor\Parameters($site, $period, $segment);
         return new ArchiveProcessorTest($params);
+    }
+
+    private function _createArchiveProcessorInst($periodLabel, $dateLabel, $idSite, $archiveOnly = false, $plugin = false)
+    {
+        $period = Period\Factory::build($periodLabel, $dateLabel);
+        $segment = new Segment('', [$idSite], $period->getDateTimeStart(), $period->getDateTimeEnd());
+
+        $params = new ArchiveProcessor\Parameters(new Site($idSite), $period, $segment);
+        if ($archiveOnly) {
+            $params->setRequestedPlugin($plugin);
+            $params->setArchiveOnlyReport($archiveOnly);
+        }
+        $archiveWriter = new ArchiveWriter($params);
+        $logAggregator = new LogAggregator($params);
+        $archiveProcessor = new class ($params, $archiveWriter, $logAggregator) extends ArchiveProcessor {
+            private $captureInserts = false;
+            private $capturedInserts = [];
+
+            public function captureInserts()
+            {
+                $this->captureInserts = true;
+            }
+
+            public function insertNumericRecord($name, $value)
+            {
+                if ($this->captureInserts) {
+                    $this->capturedInserts[] = [$name, $value];
+                } else {
+                    parent::insertNumericRecord($name, $value);
+                }
+            }
+
+            public function insertBlobRecord($name, $values)
+            {
+                if ($this->captureInserts) {
+                    $this->capturedInserts[] = [$name, $values];
+                } else {
+                    parent::insertBlobRecord($name, $values);
+                }
+            }
+
+            public function getCapturedInserts()
+            {
+                return $this->capturedInserts;
+            }
+        };
+
+        return [$archiveProcessor, $archiveWriter, $params];
     }
 
     /**
@@ -113,7 +146,7 @@ class ArchiveProcessingTest extends IntegrationTestCase
         $siteTimezone = 'UTC+10';
         $now = time();
         // this test fails in the last 10 hours of the last day of the month
-        if(date('m', $now) != date('m', $now + 10 * 3600)) {
+        if (date('m', $now) != date('m', $now + 10 * 3600)) {
             $this->markTestSkipped('testInitCurrentMonth will fail in the last hours of the month, skipping...');
         }
 
@@ -124,17 +157,13 @@ class ArchiveProcessingTest extends IntegrationTestCase
         // min finished timestamp considered when looking at archive timestamp
         $timeout = Rules::getTodayArchiveTimeToLive();
         $this->assertTrue($timeout >= 10);
-        $dateMinArchived = $now - $timeout;
-        $this->compareTimestamps($dateMinArchived, $archiveProcessor->public_getMinTimeArchiveProcessed());
-
-        $this->assertTrue($archiveProcessor->public_isArchiveTemporary());
     }
 
     private function compareTimestamps($expected, $processed)
     {
 //        $messageIfFails = Date::factory($expected)->getDatetime() . " != " . Date::factory($processed)->getDatetime();
         $messageIfFails = "Expected [$expected] but got [$processed]";
-        $this->assertTrue( abs($expected-$processed) <=4 , $messageIfFails);
+        $this->assertTrue(abs($expected - $processed) <= 4, $messageIfFails);
     }
 
     /**
@@ -144,13 +173,8 @@ class ArchiveProcessingTest extends IntegrationTestCase
     {
         $archiveProcessor = $this->_createArchiveProcessor('day', '2010-01-01', 'UTC');
 
-        // min finished timestamp considered when looking at archive timestamp
-        $dateMinArchived = Date::factory('2010-01-02')->getTimestamp();
-        $this->assertEquals($dateMinArchived, $archiveProcessor->public_getMinTimeArchiveProcessed() + 1);
-
         $this->assertEquals('2010-01-01 00:00:00', $archiveProcessor->getParams()->getDateStart()->getDateStartUTC());
         $this->assertEquals('2010-01-01 23:59:59', $archiveProcessor->getParams()->getDateEnd()->getDateEndUTC());
-        $this->assertFalse($archiveProcessor->public_isArchiveTemporary());
     }
 
     /**
@@ -160,13 +184,9 @@ class ArchiveProcessingTest extends IntegrationTestCase
     {
         $timezone = 'UTC+5.5';
         $archiveProcessor = $this->_createArchiveProcessor('day', '2010-01-01', $timezone);
-        // min finished timestamp considered when looking at archive timestamp
-        $dateMinArchived = Date::factory('2010-01-01 18:30:00');
-        $this->assertEquals($dateMinArchived->getTimestamp(), $archiveProcessor->public_getMinTimeArchiveProcessed() + 1);
 
         $this->assertEquals('2009-12-31 18:30:00', $archiveProcessor->getParams()->getDateStart()->getDateStartUTC());
         $this->assertEquals('2010-01-01 18:29:59', $archiveProcessor->getParams()->getDateEnd()->getDateEndUTC());
-        $this->assertFalse($archiveProcessor->public_isArchiveTemporary());
     }
 
     /**
@@ -176,13 +196,9 @@ class ArchiveProcessingTest extends IntegrationTestCase
     {
         $timezone = 'UTC-5.5';
         $archiveProcessor = $this->_createArchiveProcessor('month', '2010-01-02', $timezone);
-        // min finished timestamp considered when looking at archive timestamp
-        $dateMinArchived = Date::factory('2010-02-01 05:30:00');
-        $this->assertEquals($dateMinArchived->getTimestamp(), $archiveProcessor->public_getMinTimeArchiveProcessed() + 1);
 
         $this->assertEquals('2010-01-01 05:30:00', $archiveProcessor->getParams()->getDateStart()->getDateStartUTC());
         $this->assertEquals('2010-02-01 05:29:59', $archiveProcessor->getParams()->getDateEnd()->getDateEndUTC());
-        $this->assertFalse($archiveProcessor->public_isArchiveTemporary());
     }
 
     /**
@@ -200,21 +216,12 @@ class ArchiveProcessingTest extends IntegrationTestCase
         $archiveProcessor = $this->_createArchiveProcessor('day', $dateLabel, $siteTimezone);
         $archiveProcessor->time = $now;
 
-        // we look at anything processed within the time to live range
-        $dateMinArchived = $now - Rules::getTodayArchiveTimeToLive();
-        $this->compareTimestamps($dateMinArchived, $archiveProcessor->public_getMinTimeArchiveProcessed() );
-        $this->assertTrue($archiveProcessor->public_isArchiveTemporary());
-
         // when browsers don't trigger archives...
         Rules::setBrowserTriggerArchiving(false);
         // ...we force ArchiveProcessor to fetch any of the most recent archive
-        $dateMinArchived = false;
-
-        $this->compareTimestamps($dateMinArchived, $archiveProcessor->public_getMinTimeArchiveProcessed());
 
         $this->assertEquals(date('Y-m-d', $timestamp) . ' 01:00:00', $archiveProcessor->getParams()->getDateStart()->getDateStartUTC());
         $this->assertEquals(date('Y-m-d', $timestamp + 86400) . ' 00:59:59', $archiveProcessor->getParams()->getDateEnd()->getDateEndUTC());
-        $this->assertTrue($archiveProcessor->public_isArchiveTemporary());
     }
 
     /**
@@ -236,25 +243,15 @@ class ArchiveProcessingTest extends IntegrationTestCase
         $archiveProcessor = $this->_createArchiveProcessor('day', $dateLabel, $siteTimezone);
         $archiveProcessor->time = $now;
 
-        // we look at anything processed within the time to live range
-        $dateMinArchived = $now - Rules::getTodayArchiveTimeToLive();
-        $this->compareTimestamps($dateMinArchived, $archiveProcessor->public_getMinTimeArchiveProcessed());
-        $this->assertTrue($archiveProcessor->public_isArchiveTemporary());
-
         // when browsers don't trigger archives...
         Rules::setBrowserTriggerArchiving(false);
         // ...we force ArchiveProcessor to fetch any of the most recent archive
-        $dateMinArchived = false;
-
-        $this->compareTimestamps($dateMinArchived, $archiveProcessor->public_getMinTimeArchiveProcessed());
 
         // this test varies with DST
         $this->assertTrue($archiveProcessor->getParams()->getDateStart()->getDateStartUTC() == date('Y-m-d', $timestamp - 86400) . ' 22:00:00' ||
             $archiveProcessor->getParams()->getDateStart()->getDateStartUTC() == date('Y-m-d', $timestamp - 86400) . ' 23:00:00');
         $this->assertTrue($archiveProcessor->getParams()->getDateEnd()->getDateEndUTC() == date('Y-m-d', $timestamp) . ' 21:59:59' ||
             $archiveProcessor->getParams()->getDateEnd()->getDateEndUTC() == date('Y-m-d', $timestamp) . ' 22:59:59');
-
-        $this->assertTrue($archiveProcessor->public_isArchiveTemporary());
     }
 
     /**
@@ -276,24 +273,14 @@ class ArchiveProcessingTest extends IntegrationTestCase
         $archiveProcessor = $this->_createArchiveProcessor('day', $dateLabel, $siteTimezone);
         $archiveProcessor->time = $now;
 
-        // we look at anything processed within the time to live range
-        $dateMinArchived = $now - Rules::getTodayArchiveTimeToLive();
-        $this->compareTimestamps($dateMinArchived, $archiveProcessor->public_getMinTimeArchiveProcessed() );
-        $this->assertTrue($archiveProcessor->public_isArchiveTemporary());
-
         // when browsers don't trigger archives...
         Rules::setBrowserTriggerArchiving(false);
-        // ...we force ArchiveProcessor to fetch any of the most recent archive
-        $dateMinArchived = false;
-        $this->compareTimestamps($dateMinArchived, $archiveProcessor->public_getMinTimeArchiveProcessed());
 
         // this test varies with DST
         $this->assertTrue($archiveProcessor->getParams()->getDateStart()->getDateStartUTC() == date('Y-m-d', $timestamp) . ' 04:00:00' ||
             $archiveProcessor->getParams()->getDateStart()->getDateStartUTC() == date('Y-m-d', $timestamp) . ' 05:00:00');
         $this->assertTrue($archiveProcessor->getParams()->getDateEnd()->getDateEndUTC() == date('Y-m-d', $timestamp + 86400) . ' 03:59:59' ||
             $archiveProcessor->getParams()->getDateEnd()->getDateEndUTC() == date('Y-m-d', $timestamp + 86400) . ' 04:59:59');
-
-        $this->assertTrue($archiveProcessor->public_isArchiveTemporary());
     }
 
     /**
@@ -308,7 +295,6 @@ class ArchiveProcessingTest extends IntegrationTestCase
                 array('idsite', 'url'),
                 $data,
                 $throwException = true, 'utf8');
-
         } catch (Exception $e) {
             $didWeUseBulk = $e->getMessage();
         }
@@ -333,12 +319,12 @@ class ArchiveProcessingTest extends IntegrationTestCase
             $skippedOnce = true;
             $this->fail(
                 'Performance notice: LOAD DATA [LOCAL] INFILE query is not working, so Piwik will fallback to using plain INSERTs '
-                    . ' which will result in a slightly slower Archiving process.'
-                    . ". \n"
-                    . ' The error Messages from MySQL were: '
-                    . $didWeUseBulk
-                    . "\n\n Learn more how to enable LOAD LOCAL DATA INFILE see the Mysql doc (http://dev.mysql.com/doc/refman/5.0/en/load-data-local.html) "
-                    . "\n   or ask in this Piwik ticket (https://github.com/matomo-org/piwik/issues/3605)"
+                . ' which will result in a slightly slower Archiving process.'
+                . ". \n"
+                . ' The error Messages from MySQL were: '
+                . $didWeUseBulk
+                . "\n\n Learn more how to enable LOAD LOCAL DATA INFILE see the Mysql doc (http://dev.mysql.com/doc/refman/5.0/en/load-data-local.html) "
+                . "\n   or ask in this Piwik ticket (https://github.com/matomo-org/matomo/issues/3605)"
             );
         }
         return $didWeUseBulk;
@@ -418,6 +404,305 @@ class ArchiveProcessingTest extends IntegrationTestCase
             return;
         }
         $this->fail('Exception expected');
+    }
+
+    public function test_aggregateNumericMetrics_aggregatesCorrectly()
+    {
+        $allMetrics = [
+            '2015-02-03' => [
+                'nb_visits' => 2,
+                'max_actions' => 3,
+            ],
+            '2015-02-04' => [
+                'nb_visits' => 2,
+                'max_actions' => 4,
+            ],
+            '2015-02-05' => [
+                'nb_visits' => 2,
+                'max_actions' => 1,
+            ],
+        ];
+
+        $site = $this->_createWebsite('UTC');
+
+        foreach ($allMetrics as $date => $metrics) {
+            /** @var ArchiveWriter $archiveWriter */
+            list($archiveProcessor, $archiveWriter, $params) = $this->_createArchiveProcessorInst('day', $date, $site->getId());
+            $archiveWriter->initNewArchive();
+
+            $archiveProcessor->insertNumericRecords($metrics);
+
+            $archiveWriter->finalizeArchive();
+        }
+
+        /** @var ArchiveProcessor $archiveProcessor */
+        list($archiveProcessor, $archiveWriter, $params) = $this->_createArchiveProcessorInst('week', '2015-02-03', $site->getId());
+        $archiveWriter->initNewArchive();
+
+        $archiveProcessor->captureInserts();
+        $archiveProcessor->aggregateNumericMetrics(['nb_visits', 'max_actions']);
+
+        $archiveWriter->finalizeArchive();
+
+        $capturedInserts = $archiveProcessor->getCapturedInserts();
+
+        $expected = [
+            [
+                'nb_visits',
+                6,
+            ],
+            [
+                'max_actions',
+                4,
+            ]
+        ];
+
+        $this->assertEquals($expected, $capturedInserts);
+    }
+
+    public function test_aggregateNumericMetrics_handlesPartialArchives()
+    {
+        $allMetrics = [
+            '2015-02-03' => [
+                'nb_visits' => 2,
+                'max_actions' => 1,
+            ],
+            '2015-02-04' => [
+                'nb_visits' => 2,
+                'max_actions' => 3,
+            ],
+            '2015-02-05' => [
+                'nb_visits' => 2,
+                'max_actions' => 4,
+            ],
+        ];
+
+        $site = $this->_createWebsite('UTC');
+
+        foreach ($allMetrics as $date => $metrics) {
+            /** @var ArchiveWriter $archiveWriter */
+            list($archiveProcessor, $archiveWriter) = $this->_createArchiveProcessorInst('day', $date, $site->getId());
+            $archiveWriter->initNewArchive();
+
+            $archiveProcessor->insertNumericRecords($metrics);
+
+            $archiveWriter->finalizeArchive();
+        }
+
+        /** @var ArchiveProcessor $archiveProcessor */
+        list($archiveProcessor, $archiveWriter, $params) = $this->_createArchiveProcessorInst('week', '2015-02-03', $site->getId(), 'nb_visits', 'VisitsSummary');
+        $params->setIsPartialArchive(true);
+        $idArchive = $archiveWriter->initNewArchive();
+
+        $archiveProcessor->captureInserts();
+        $archiveProcessor->aggregateNumericMetrics(['nb_visits']);
+
+        $archiveWriter->finalizeArchive();
+
+        $capturedInserts = $archiveProcessor->getCapturedInserts();
+
+        $expected = [
+            [
+                'nb_visits',
+                6,
+            ],
+        ];
+
+        $archiveDoneFlag = Db::fetchOne("SELECT `value` FROM " . ArchiveTableCreator::getNumericTable(Date::factory('2015-02-03')) . " WHERE idarchive = ? AND name LIKE 'done%'", [$idArchive]);
+        $this->assertEquals(ArchiveWriter::DONE_PARTIAL, $archiveDoneFlag);
+
+        $this->assertEquals($expected, $capturedInserts);
+    }
+
+    public function test_aggregateDataTableRecords_aggregatesCorrectly()
+    {
+        $table1 = new DataTable();
+        $table1->addRowsFromSimpleArray([
+            ['label' => 'a', 'nb_visits' => 5, 'nb_actions' => 1],
+            ['label' => 'b', 'nb_visits' => 3, 'nb_actions' => 1],
+        ]);
+        $table2 = new DataTable();
+        $table2->addRowsFromSimpleArray([
+            ['label' => 'a', 'nb_visits' => 2, 'nb_actions' => 2],
+        ]);
+        $table3 = new DataTable();
+        $table3->addRowsFromSimpleArray([
+            ['label' => 'b', 'nb_visits' => 4, 'nb_actions' => 3],
+        ]);
+
+        $tables = [
+            '2015-02-03' => $table1,
+            '2015-02-04' => $table2,
+            '2015-02-05' => $table3,
+        ];
+
+        $site = $this->_createWebsite('UTC');
+
+        foreach ($tables as $date => $table) {
+            /** @var ArchiveWriter $archiveWriter */
+            list($archiveProcessor, $archiveWriter) = $this->_createArchiveProcessorInst('day', $date, $site->getId());
+            $archiveWriter->initNewArchive();
+
+            $tableSerialized = $table->getSerialized();
+            $archiveProcessor->insertBlobRecord('Actions_test_value', $tableSerialized);
+
+            $archiveWriter->finalizeArchive();
+        }
+
+        list($archiveProcessor, $archiveWriter) = $this->_createArchiveProcessorInst('week', '2015-02-03', $site->getId());
+        $archiveWriter->initNewArchive();
+
+        $archiveProcessor->captureInserts();
+        $archiveProcessor->aggregateDataTableRecords('Actions_test_value');
+
+        $archiveWriter->finalizeArchive();
+
+        $capturedInserts = $archiveProcessor->getCapturedInserts();
+        $capturedInsertTable = DataTable::fromSerializedArray($capturedInserts[0][1][0]);
+        $capturedInsertTable = $this->getXml($capturedInsertTable);
+
+        $expectedXml = <<<END
+<?xml version="1.0" encoding="utf-8" ?>
+<result>
+	<row>
+		<label>a</label>
+		<nb_visits>7</nb_visits>
+		<nb_actions>3</nb_actions>
+	</row>
+	<row>
+		<label>b</label>
+		<nb_visits>7</nb_visits>
+		<nb_actions>4</nb_actions>
+	</row>
+</result>
+END;
+
+        $this->assertEquals($expectedXml, $capturedInsertTable);
+    }
+
+    public function test_aggregateDataTableRecords_handlesPartialArchives()
+    {
+        $table1 = new DataTable();
+        $table1->addRowsFromSimpleArray([
+            ['label' => 'a', 'nb_visits' => 5, 'nb_actions' => 1],
+            ['label' => 'b', 'nb_visits' => 3, 'nb_actions' => 1],
+        ]);
+        $table2 = new DataTable();
+        $table2->addRowsFromSimpleArray([
+            ['label' => 'a', 'nb_visits' => 2, 'nb_actions' => 2],
+        ]);
+        $table3 = new DataTable();
+        $table3->addRowsFromSimpleArray([
+            ['label' => 'b', 'nb_visits' => 4, 'nb_actions' => 3],
+        ]);
+
+        $tables = [
+            '2015-02-03' => $table1,
+            '2015-02-04' => $table2,
+            '2015-02-05' => $table3,
+        ];
+
+        $site = $this->_createWebsite('UTC');
+
+        foreach ($tables as $date => $table) {
+            /** @var ArchiveWriter $archiveWriter */
+            list($archiveProcessor, $archiveWriter) = $this->_createArchiveProcessorInst('day', $date, $site->getId());
+            $archiveWriter->initNewArchive();
+
+            $tableSerialized = $table->getSerialized();
+            $archiveProcessor->insertBlobRecord('Actions_test_value', $tableSerialized);
+
+            $archiveWriter->finalizeArchive();
+        }
+
+        /** @var ArchiveProcessor $archiveProcessor */
+        list($archiveProcessor, $archiveWriter, $params) = $this->_createArchiveProcessorInst('week', '2015-02-03', $site->getId(), 'Actions_test_value', 'VisitsSummary');
+        $params->setIsPartialArchive(true);
+        $idArchive = $archiveWriter->initNewArchive();
+
+        $archiveProcessor->captureInserts();
+        $archiveProcessor->aggregateDataTableRecords('Actions_test_value');
+
+        $archiveWriter->finalizeArchive();
+
+        $capturedInserts = $archiveProcessor->getCapturedInserts();
+        $this->assertNotEmpty($capturedInserts);
+
+        $archiveDoneFlag = Db::fetchOne("SELECT `value` FROM " . ArchiveTableCreator::getNumericTable(Date::factory('2015-02-03')) . " WHERE idarchive = ? AND name LIKE 'done%'", [$idArchive]);
+        $this->assertEquals(ArchiveWriter::DONE_PARTIAL, $archiveDoneFlag);
+    }
+
+    public function test_aggregateDataTableRecords_handlesNegativeOneLabels()
+    {
+        $table1 = new DataTable();
+        $table1->addRowsFromSimpleArray([
+            ['label' => 'a', 'nb_visits' => 5, 'nb_actions' => 1],
+            ['label' => '-1', 'nb_visits' => 3, 'nb_actions' => 1],
+        ]);
+        $table1->addSummaryRow(new DataTable\Row([
+            DataTable\Row::COLUMNS => ['label' => -1, 'nb_visits' => 10, 'nb_actions' => 15],
+        ]));
+        $table2 = new DataTable();
+        $table2->addRowsFromSimpleArray([
+            ['label' => 'a', 'nb_visits' => 2, 'nb_actions' => 2],
+            ['label' => -1, 'nb_visits' => 9, 'nb_actions' => 5],
+        ]);
+        $table2->addSummaryRow(new DataTable\Row([
+            DataTable\Row::COLUMNS => ['label' => -1, 'nb_visits' => 15, 'nb_actions' => 25],
+        ]));
+
+        $tables = [
+            '2015-02-03' => $table1,
+            '2015-02-04' => $table2,
+        ];
+
+        $site = $this->_createWebsite('UTC');
+
+        foreach ($tables as $date => $table) {
+            /** @var ArchiveWriter $archiveWriter */
+            list($archiveProcessor, $archiveWriter) = $this->_createArchiveProcessorInst('day', $date, $site->getId());
+            $archiveWriter->initNewArchive();
+
+            $tableSerialized = $table->getSerialized();
+            $archiveProcessor->insertBlobRecord('Actions_test_value', $tableSerialized);
+
+            $archiveWriter->finalizeArchive();
+        }
+
+        list($archiveProcessor, $archiveWriter) = $this->_createArchiveProcessorInst('week', '2015-02-03', $site->getId());
+        $archiveWriter->initNewArchive();
+
+        $archiveProcessor->captureInserts();
+        $archiveProcessor->aggregateDataTableRecords('Actions_test_value');
+
+        $archiveWriter->finalizeArchive();
+
+        $capturedInserts = $archiveProcessor->getCapturedInserts();
+        $capturedInsertTable = DataTable::fromSerializedArray($capturedInserts[0][1][0]);
+        $capturedInsertTable = $this->getXml($capturedInsertTable);
+
+        $expectedXml = <<<END
+<?xml version="1.0" encoding="utf-8" ?>
+<result>
+	<row>
+		<label>a</label>
+		<nb_visits>7</nb_visits>
+		<nb_actions>3</nb_actions>
+	</row>
+	<row>
+		<label>-1</label>
+		<nb_visits>12</nb_visits>
+		<nb_actions>6</nb_actions>
+	</row>
+	<row>
+		<label>-1</label>
+		<nb_visits>25</nb_visits>
+		<nb_actions>40</nb_actions>
+	</row>
+</result>
+END;
+
+        $this->assertEquals($expectedXml, $capturedInsertTable);
     }
 
     protected function _checkTableIsExpected($table, $data)
@@ -505,5 +790,12 @@ class ArchiveProcessingTest extends IntegrationTestCase
         return array(
             'Piwik\Access' => new FakeAccess()
         );
+    }
+
+    private function getXml(DataTable $capturedInsertTable)
+    {
+        $xml = new DataTable\Renderer\Xml();
+        $xml->setTable($capturedInsertTable);
+        return $xml->render();
     }
 }

@@ -1,16 +1,17 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\System;
 
 use Piwik\Common;
-use Piwik\Config;
 use Piwik\Db;
+use Piwik\Log\Logger;
+use Piwik\Log\LoggerInterface;
 use Piwik\Option;
 use Piwik\Plugins\UserCountry\LocationProvider;
 use Piwik\Scheduler\Schedule\Schedule;
@@ -19,7 +20,6 @@ use Piwik\Scheduler\Timetable;
 use Piwik\SettingsPiwik;
 use Piwik\Tests\Framework\Fixture;
 use Piwik\Tests\Framework\TestCase\IntegrationTestCase;
-use Piwik\Tracker;
 
 /**
  * @group Core
@@ -30,7 +30,7 @@ class TrackerTest extends IntegrationTestCase
     const TASKS_FINISHED_OPTION_NAME = "Tests.scheduledTasksFinished";
     const TASKS_STARTED_OPTION_NAME = "Tests.scheduledTasksStarted";
 
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -45,6 +45,7 @@ class TrackerTest extends IntegrationTestCase
         Option::delete(self::TASKS_STARTED_OPTION_NAME);
         Option::delete(self::TASKS_FINISHED_OPTION_NAME);
         Option::delete(Timetable::TIMETABLE_OPTION_STRING);
+        Option::delete(Timetable::RETRY_OPTION_STRING);
 
         SettingsPiwik::overwritePiwikUrl(self::$fixture->getRootUrl() . "tests/PHPUnit/proxy");
     }
@@ -124,6 +125,26 @@ class TrackerTest extends IntegrationTestCase
         $this->assertActionEquals('scary <> movies', $conversionItems[0]['idaction_category']);
     }
 
+    public function test_trackingEcommerceOrder_WithNameAndSKUArrays()
+    {
+        // item sku, item name, item category, item price, item quantity
+        $ecItems = array(array(["sku1", "sku2"], ["name1", "name2"], 'category1', 12.99, 1));
+
+        $urlToTest = $this->getEcommerceItemsUrl($ecItems);
+
+        $response = $this->sendTrackingRequestByCurl($urlToTest);
+        Fixture::checkResponse($response);
+
+        $this->assertEquals(1, $this->getCountOfConversions());
+
+        $conversionItems = $this->getConversionItems();
+        $this->assertEquals(1, count($conversionItems));
+
+        $this->assertActionEquals('sku1,sku2', $conversionItems[0]['idaction_sku']);
+        $this->assertActionEquals('name1,name2', $conversionItems[0]['idaction_name']);
+        $this->assertActionEquals('category1', $conversionItems[0]['idaction_category']);
+    }
+
     public function test_trackingEcommerceOrder_DoesNotFail_WhenEmptyEcommerceItemsParamUsed()
     {
         // item sku, item name, item category, item price, item quantity
@@ -146,6 +167,25 @@ class TrackerTest extends IntegrationTestCase
 
         $this->assertEquals(0, $this->getCountOfConversions());
         $this->assertEquals(0, count($this->getConversionItems()));
+    }
+
+    public function test_trackingEcommerceOrder_FailsWhenNonUniqueOrderIsUsed()
+    {
+        $ecItems = array(array("\"scarysku&", "superscarymovie'", 'scary <> movies', 12.99, 1));
+
+        $urlToTest = $this->getEcommerceItemsUrl($ecItems);
+
+        $response = $this->sendTrackingRequestByCurl($urlToTest);
+        Fixture::checkResponse($response);
+
+        $this->assertEquals(1, $this->getCountOfConversions());
+        $this->assertEquals(1, count($this->getConversionItems()));
+
+        $response = $this->sendTrackingRequestByCurl($urlToTest);
+        self::assertStringContainsString('This resource is part of Matomo.', $response);
+
+        $this->assertEquals(1, $this->getCountOfConversions());
+        $this->assertEquals(1, count($this->getConversionItems()));
     }
 
     public function test_trackingWithLangParameter_ForwardsLangParameter_ToDefaultLocationProvider()
@@ -191,7 +231,7 @@ class TrackerTest extends IntegrationTestCase
 
         $this->assertScheduledTasksWereRun();
 
-        $this->assertContains('Scheduled Tasks: Starting...', $response);
+        self::assertStringContainsString('Scheduled Tasks: Starting...', $response);
     }
 
     public function getTypesOfErrorsForScheduledTasksTrackerFailureTest()
@@ -224,7 +264,7 @@ class TrackerTest extends IntegrationTestCase
 
     protected function issueBulkTrackingRequest($token_auth, $expectTrackingToSucceed)
     {
-        $piwikHost = Fixture::getRootUrl() . 'tests/PHPUnit/proxy/piwik.php';
+        $piwikHost = Fixture::getRootUrl() . 'tests/PHPUnit/proxy/matomo.php';
 
         $command = 'curl -s -X POST -d \'{"requests":["?idsite=1&url=http://example.org&action_name=Test bulk log Pageview&rec=1","?idsite=1&url=http://example.net/test.htm&action_name=Another bulk page view&rec=1"],"token_auth":"' . $token_auth . '"}\' ' . $piwikHost;
 
@@ -236,11 +276,11 @@ class TrackerTest extends IntegrationTestCase
         $this->assertStringStartsWith('{"status":', $output);
 
         if($expectTrackingToSucceed) {
-            $this->assertNotContains('error', $output);
-            $this->assertContains('success', $output);
+            self::assertStringNotContainsString('error', $output);
+            self::assertStringContainsString('success', $output);
         } else {
-            $this->assertContains('error', $output);
-            $this->assertNotContains('success', $output);
+            self::assertStringContainsString('error', $output);
+            self::assertStringNotContainsString('success', $output);
         }
     }
 
@@ -251,7 +291,7 @@ class TrackerTest extends IntegrationTestCase
         }
 
         $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, Fixture::getRootUrl() . 'tests/PHPUnit/proxy/piwik.php' . $url);
+        curl_setopt($ch, CURLOPT_URL, Fixture::getRootUrl() . 'tests/PHPUnit/proxy/matomo.php' . $url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         curl_setopt($ch, CURLOPT_HEADER, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 10);
@@ -340,7 +380,7 @@ class TrackerTest extends IntegrationTestCase
             $initialTask = new Task($this, 'markCustomTaskExecuted', null, Schedule::factory('hourly'));
             $tasksToAdd = array_merge(array($initialTask), $tasksToAdd);
 
-            $mockTaskLoader = $this->getMock('Piwik\Scheduler\TaskLoader', array('loadTasks'));
+            $mockTaskLoader = $this->createPartialMock('Piwik\Scheduler\TaskLoader', array('loadTasks'));
             $mockTaskLoader->expects($this->any())->method('loadTasks')->will($this->returnValue($tasksToAdd));
             $result['Piwik\Scheduler\TaskLoader'] = $mockTaskLoader;
         }
@@ -380,7 +420,7 @@ class TrackerTest extends IntegrationTestCase
         $this->assertCustomTasksWereStarted();
 
         Option::clearCachedOption(self::TASKS_FINISHED_OPTION_NAME);
-        $this->assertEmpty(Option::get(self::TASKS_FINISHED_OPTION_NAME));
+        $this->assertFalse(Option::get(self::TASKS_FINISHED_OPTION_NAME));
     }
 
     private function assertCustomTasksWereStarted()
@@ -392,8 +432,8 @@ class TrackerTest extends IntegrationTestCase
     public static function provideContainerConfigBeforeClass()
     {
         return array(
-            'Psr\Log\LoggerInterface' => \DI\get('Monolog\Logger')
+            LoggerInterface::class => \Piwik\DI::get(Logger::class),
+            'Tests.log.allowAllHandlers' => true,
         );
     }
-
 }

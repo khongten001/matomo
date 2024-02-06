@@ -1,21 +1,34 @@
 /*!
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
  * Tests that theming works.
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
-var fs = require('fs');
+var fs = require('fs'),
+    path = require('../../lib/screenshot-testing/support/path');
+
+var removeTree = function(path) {
+    if (fs.existsSync(path)) {
+        fs.readdirSync(path).forEach(function (file, index) {
+            var curPath = path + "/" + file;
+            if (fs.lstatSync(curPath).isDirectory()) { // recurse
+                removeTree(curPath);
+            } else { // delete file
+                fs.unlinkSync(curPath);
+            }
+        });
+        fs.rmdirSync(path);
+    }
+}
 
 describe("Theme", function () {
-    this.retries(2);
-
     this.timeout(0);
 
     function clearAssets() {
-        fs.removeTree(path.join(PIWIK_INCLUDE_PATH, 'tmp', 'assets'));
+        removeTree(path.join(PIWIK_INCLUDE_PATH, 'tmp', 'assets'));
     }
 
     before(function () {
@@ -29,19 +42,29 @@ describe("Theme", function () {
     });
 
     after(function () {
-        
+
         clearAssets();
     });
 
-    it("should use the current theme", function (done) {
-        expect.screenshot("home").to.be.capture(function (page) {
-            page.load("?module=CoreHome&action=index&idSite=1&period=year&date=2012-08-09");
-        }, done);
+    it("should use the current theme", async function () {
+        await page.goto("?module=CoreHome&action=index&idSite=1&period=year&date=2012-08-09");
+        await page.waitForSelector('.widget');
+        await page.waitForTimeout(500);
+        await page.waitForNetworkIdle();
+        expect(await page.screenshot({ fullPage: true })).to.matchImage('home');
     });
 
-    it("should theme the UI demo page", function (done) {
-        expect.screenshot("demo").to.be.similar(0.002).to.be.capture(function (page) {
-            page.load("?module=Morpheus&action=demo");
-        }, done);
+    it("should theme the UI demo page", async function () {
+        await page.goto("?module=Morpheus&action=demo");
+        await page.waitForSelector('.progressbar img');
+        await page.evaluate(() => {
+            $('img[src~=loading],.progressbar img').each(function () {
+                $(this).hide();
+            });
+        });
+        await page.waitForNetworkIdle();
+        await page.waitForTimeout(500);
+        await page.waitForNetworkIdle();
+        expect(await page.screenshot({ fullPage: true })).to.matchImage('demo');
     });
 });

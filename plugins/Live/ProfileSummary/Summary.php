@@ -1,24 +1,22 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\Live\ProfileSummary;
 
+use Piwik\API\Request;
 use Piwik\Common;
 use Piwik\Piwik;
 use Piwik\View;
-use Piwik\Plugins\Goals\API as APIGoals;
 
 /**
- * Class ProfileSummaryAbstract
+ * Class Summary
  *
- * This class can be implemented in a plugin to provide a new profile summary
- *
- * @api
+ * Displays some general details in the profile summary
  */
 class Summary extends ProfileSummaryAbstract
 {
@@ -37,7 +35,7 @@ class Summary extends ProfileSummaryAbstract
     {
         $idSite            = Common::getRequestVar('idSite', null, 'int');
         $view              = new View('@Live/_profileSummary.twig');
-        $view->goals       = APIGoals::getInstance()->getGoals($idSite);
+        $view->goals       = Request::processRequest('Goals.getGoals', ['idSite' => $idSite, 'filter_limit' => '-1'], $default = []);
         $view->visitorData = $this->profile;
         return $view->render();
     }

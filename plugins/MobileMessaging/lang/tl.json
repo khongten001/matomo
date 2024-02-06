@@ -7,6 +7,8 @@
         "MultiSites_Must_Be_Activated": "Upang makabuo ng mga teksto ng SMS sa iyong stats website mangyaring paganahin ang MultiSites plugin sa Matomo.",
         "PhoneNumbers": "Mga numero ng telepono",
         "PluginDescription": "Lumikha at mag-download ng mga custome na ulat sa SMS at itoy ipadala sa iyong mobile araw-araw lingo-linggo o buwanan.",
+        "SMS_Content_Too_Long": "[masyadong mahaba]",
+        "SettingsMenu": "Mobile Messaging",
         "Settings_APIKey": "API Key",
         "Settings_CountryCode": "Country Code",
         "Settings_CredentialNotProvided": "Bago ka gumawa at pamahalaan ang mga numero ng telepono mangyaring e-konekta ang Matomo sa iyong SMS Account sa itaas.",
@@ -16,7 +18,6 @@
         "Settings_InvalidActivationCode": "Ang ipinasok na code ay hindi balido pakisubukang muli.",
         "Settings_LetUsersManageAPICredential": "Pahintulutan ang mga gumagamit na pamahalaan ang kredensyal ng kanilang sariling SMS API.",
         "Settings_LetUsersManageAPICredential_No_Help": "Lahat ng mga user ay makakatanggap ng mga ulat sa SMS at magagamit ang iyong user account's credits.",
-        "Settings_LetUsersManageAPICredential_Yes_Help": "Ang bawat user ay makakapag-setup ng kanilang sariling SMS API Account at hindi gagamitin ang iyong credit.",
         "Settings_ManagePhoneNumbers": "Pamahalaan ang mga Numero ng Telepono",
         "Settings_PhoneActivated": "Ang numero ng telepono ay nabigyang-bisa! Maaari ka nang makatanggap ng SMS tungkol sa iyong stats.",
         "Settings_PhoneNumber": "Phone Number",
@@ -29,11 +30,8 @@
         "Settings_SuspiciousPhoneNumber": "Kung hindi mo natanggap ang text message maaari mong subukan mo ng walang mga zero sa unahan ng numbero. ibig sabihin. %s",
         "Settings_UpdateOrDeleteAccount": "Pwede mo ring %1$s i-update %2$s o %3$s tanggalin %4$s ang account na ito.",
         "Settings_ValidatePhoneNumber": "Validate",
-        "Settings_VerificationCodeJustSent": "Kakapadala lang namin ng SMS sa numerong ito na may code na: mangyarin ilagay ang code sa taas at e-click ang \"Validate\".",
-        "SettingsMenu": "Mobile Messaging",
-        "SMS_Content_Too_Long": "[masyadong mahaba]",
         "TopLinkTooltip": "Kumuha ng Ulat para sa Web Analytics na mai-hahatid sa iyong email inbox o sa iyong mobile phone.",
         "TopMenu": "Mga ulat ng Email at SMS",
-        "VerificationText": "Ang code ay %1$s. Upang mapatunayan ang iyong numero at makatanggap ng Matomo SMS mangyaring kopyahin ang code na ito sa form sa pamamagitan ng Matomo >%2$s >%3$s"
+        "VerificationText": "Ang code ay %1$s. Upang mapatunayan ang iyong numero at makatanggap ng Matomo SMS mangyaring kopyahin ang code na ito sa form sa pamamagitan ng Matomo → %2$s → %3$s"
     }
 }

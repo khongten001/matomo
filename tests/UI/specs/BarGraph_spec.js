@@ -1,19 +1,16 @@
 /*!
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
  * Bar graph screenshot tests.
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 describe("BarGraph", function () {
-    this.timeout(0);
-
-    var tokenAuth = "9ad1de7f8b329ab919d854c556f860c1", // md5('superUserLogin' . md5('superUserPass'))
+    var tokenAuth = "c4ca4238a0b923820dcc509a6f75849b",
         url = "?module=Widgetize&action=iframe&moduleToWidgetize=Referrers&idSite=1&period=year&date=2012-08-09&"
-            + "actionToWidgetize=getKeywords&viewDataTable=graphVerticalBar&isFooterExpandedInDashboard=1&"
-            + "token_auth=" + tokenAuth;
+            + "actionToWidgetize=getKeywords&viewDataTable=graphVerticalBar&isFooterExpandedInDashboard=1&";
 
     before(function () {
         // use real auth + token auth to test that auth works when widgetizing reports in an iframe
@@ -21,21 +18,27 @@ describe("BarGraph", function () {
         testEnvironment.save();
     });
 
-    it("should load correctly", function (done) {
-        expect.screenshot("load").to.be.capture(function (page) {
-            page.load(url);
-        }, done);
+    it("should fail when admin token is used", async function () {
+        await page.goto(url + 'token_auth=' + tokenAuth);
+        expect(await page.screenshot({ fullPage: true })).to.matchImage('load_fail_when_token_used');
     });
 
-    it("should display the metric picker on hover of metric picker icon", function (done) {
-        expect.screenshot('metric_picker_shown').to.be.capture(function (page) {
-            page.mouseMove('.jqplot-seriespicker');
-        }, done);
+    it("should load correctly", async function () {
+        await page.goto(url + 'token_auth=a4ca4238a0b923820dcc509a6f75849f');
+        expect(await page.screenshot({ fullPage: true })).to.matchImage('load');
     });
 
-    it("should display multiple metrics when another metric picked", function (done) {
-        expect.screenshot('other_metric').to.be.capture(function (page) {
-            page.click('.jqplot-seriespicker-popover input:not(:checked):first + label');
-        }, done);
+    it("should display the metric picker on hover of metric picker icon", async function () {
+        await page.hover('.jqplot-seriespicker');
+        expect(await page.screenshot({ fullPage: true })).to.matchImage('metric_picker_shown');
+    });
+
+    it("should display multiple metrics when another metric picked", async function () {
+        await page.waitForSelector('.jqplot-seriespicker-popover input');
+        var element = await page.jQuery('.jqplot-seriespicker-popover input:not(:checked):first');
+        await element.click();
+        await page.waitForNetworkIdle();
+        await page.waitForTimeout(500);
+        expect(await page.screenshot({ fullPage: true })).to.matchImage('other_metric');
     });
 });

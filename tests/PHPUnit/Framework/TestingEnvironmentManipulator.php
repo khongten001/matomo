@@ -1,22 +1,24 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Framework;
 
-use Interop\Container\ContainerInterface;
-use Piwik\Application\Environment;
+use Piwik\Container\Container;
 use Piwik\Application\EnvironmentManipulator;
 use Piwik\Application\Kernel\GlobalSettingsProvider;
 use Piwik\Application\Kernel\PluginList;
 use Piwik\Config;
+use Piwik\DataTable;
+use Piwik\DataTable\DataTableInterface;
 use Piwik\DbHelper;
 use Piwik\Option;
 use Piwik\Plugin;
+use Piwik\SettingsServer;
 
 class FakePluginList extends PluginList
 {
@@ -31,6 +33,15 @@ class FakePluginList extends PluginList
         $section = $globalSettingsProvider->getSection('Plugins');
         $section['Plugins'] = $this->plugins;
         $globalSettingsProvider->setSection('Plugins', $section);
+    }
+
+    public function sortPlugins(array $plugins)
+    {
+        if (isset($GLOBALS['MATOMO_SORT_PLUGINS']) && is_callable($GLOBALS['MATOMO_SORT_PLUGINS'])) {
+            return call_user_func($GLOBALS['MATOMO_SORT_PLUGINS'], parent::sortPlugins($plugins));
+        }
+
+        return parent::sortPlugins($plugins);
     }
 }
 
@@ -82,11 +93,19 @@ class TestingEnvironmentManipulator implements EnvironmentManipulator
             foreach ($this->vars->queryParamOverride as $key => $value) {
                 $_GET[$key] = $value;
             }
+
+            $_SERVER['QUERY_STRING'] = http_build_query($_GET);
         }
 
         if ($this->vars->globalsOverride) {
             foreach ($this->vars->globalsOverride as $key => $value) {
                 $GLOBALS[$key] = $value;
+            }
+        }
+
+        if ($this->vars->environmentVariables) {
+            foreach ($this->vars->environmentVariables as $key => $value) {
+                putenv("$key=$value");
             }
         }
 
@@ -98,12 +117,14 @@ class TestingEnvironmentManipulator implements EnvironmentManipulator
             \Piwik\Profiler::setupProfilerXHProf($mainRun = false, $setupDuringTracking = true);
         }
 
-        \Piwik\Cache\Backend\File::$invalidateOpCacheBeforeRead = true;
+        \Matomo\Cache\Backend\File::$invalidateOpCacheBeforeRead = true;
     }
 
     public function onEnvironmentBootstrapped()
     {
-        if (empty($_GET['ignoreClearAllViewDataTableParameters'])) { // TODO: should use testingEnvironment variable, not query param
+        if (empty($this->vars->ignoreClearAllViewDataTableParameters)
+            && !SettingsServer::isTrackerApiRequest()
+        ) {
             try {
                 \Piwik\ViewDataTable\Manager::clearAllViewDataTableParameters();
             } catch (\Exception $ex) {
@@ -134,7 +155,7 @@ class TestingEnvironmentManipulator implements EnvironmentManipulator
 
     public function getExtraDefinitions()
     {
-        $testVarDefinitionSource = new TestingEnvironmentVariablesDefinitionSource($this->vars);
+        $testVarDefinitionSource = new TestingEnvironmentVariablesDefinitionSource();
 
         $diConfigs = array($testVarDefinitionSource);
         if ($this->vars->testCaseClass) {
@@ -169,9 +190,9 @@ class TestingEnvironmentManipulator implements EnvironmentManipulator
 
         $plugins = $this->getPluginsToLoadDuringTest();
         $diConfigs[] = array(
-            'observers.global' => \DI\add($this->globalObservers),
+            'observers.global' => \Piwik\DI::add($this->globalObservers),
 
-            'Piwik\Config' => \DI\decorate(function (Config $config, ContainerInterface $c) use ($plugins) {
+            'Piwik\Config' => \Piwik\DI::decorate(function (Config $config, Container $c) use ($plugins) {
                 /** @var PluginList $pluginList */
                 $pluginList = $c->get('Piwik\Application\Kernel\PluginList');
                 $plugins = $pluginList->sortPlugins($plugins);
@@ -183,6 +204,31 @@ class TestingEnvironmentManipulator implements EnvironmentManipulator
                 return $config;
             }),
         );
+
+        if (!empty($this->vars->multiplicateTableResults)) {
+            $diConfigs[] = [
+                'observers.global' => \Piwik\DI::add([
+                    [
+                        'API.Request.dispatch.end',
+                        \Piwik\DI::value(function ($returnedValue) {
+                            if ($returnedValue instanceof DataTableInterface) {
+                                $returnedValue->filter(function (DataTable $dataTable) {
+                                    foreach ($dataTable->getRows() as $row) {
+                                        $columns = $row->getColumns();
+                                        foreach ($columns as $name => &$value) {
+                                            if ($name !== 'label' && is_numeric($value)) {
+                                                $value *= $this->vars->multiplicateTableResults;
+                                            }
+                                        }
+                                        $row->setColumns($columns);
+                                    }
+                                });
+                            }
+                        })
+                    ]
+                ])
+            ];
+        }
 
         return $diConfigs;
     }
@@ -200,6 +246,26 @@ class TestingEnvironmentManipulator implements EnvironmentManipulator
     private function getPluginsToLoadDuringTest()
     {
         $plugins = $this->vars->getCoreAndSupportedPlugins();
+        $plugins[] = 'TagManager';
+        $plugins[] = 'ExamplePlugin';
+        $plugins[] = 'ExampleAPI';
+
+        $fixturePluginsToLoad = [];
+
+        if ($this->vars->testCaseClass) {
+            $testCaseClass = $this->vars->testCaseClass;
+            if ($this->classExists($testCaseClass)) {
+                if (isset($testCaseClass::$fixture)) {
+                    $fixturePluginsToLoad = $testCaseClass::$fixture->extraPluginsToLoad;
+                }
+            }
+        } else if ($this->vars->fixtureClass) {
+            $fixtureClass = $this->vars->fixtureClass;
+            if ($this->classExists($fixtureClass)) {
+                $fixture = new $fixtureClass();
+                $fixturePluginsToLoad = $fixture->extraPluginsToLoad;
+            }
+        }
 
         // make sure the plugin that executed this method is included in the plugins to load
         $extraPlugins = array_merge(
@@ -210,7 +276,8 @@ class TestingEnvironmentManipulator implements EnvironmentManipulator
                 Plugin::getPluginNameFromNamespace($this->vars->testCaseClass),
                 Plugin::getPluginNameFromNamespace($this->vars->fixtureClass),
                 Plugin::getPluginNameFromNamespace(get_called_class())
-            )
+            ),
+            $fixturePluginsToLoad
         );
 
         foreach ($extraPlugins as $pluginName) {
@@ -220,6 +287,10 @@ class TestingEnvironmentManipulator implements EnvironmentManipulator
 
             $plugins = $this->getPluginAndRequiredPlugins($pluginName, $plugins);
         }
+
+        $pluginsToUnload = $this->vars->pluginsToUnload ?? [];
+
+        $plugins = array_diff($plugins, $pluginsToUnload);
 
         return $plugins;
     }

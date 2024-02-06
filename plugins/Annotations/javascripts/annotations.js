@@ -1,7 +1,7 @@
 /*!
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -112,6 +112,7 @@
 
             var ajaxRequest = new ajaxHelper();
             ajaxRequest.addParams(ajaxParams, 'get');
+            ajaxRequest.withTokenInUrl();
             ajaxRequest.setFormat('html');
             ajaxRequest.setCallback(callback);
             ajaxRequest.send();
@@ -444,7 +445,7 @@
     /**
      * Shows an annotation manager under a report for a specific site & date range.
      *
-     * @param {Element} domElem The element of the report to show the annotation manger
+     * @param {Element} domElem The element of the report to show the annotation manager
      *                          under.
      * @param {int} idSite The ID of the site to show the annotations of.
      * @param {string} date The start date of the period.
@@ -459,7 +460,7 @@
                 date = date.split(',')[0];
             }
 
-            $('.evolution-annotations>span', domElem).each(function () {
+            $('.evolution-annotations>span[data-date]', domElem).each(function () {
                 if ($(this).attr('data-date') == date) {
                     // get counts from attributes (and convert them to ints)
                     var starredCount = +$(this).attr('data-starred'),
@@ -467,12 +468,11 @@
 
                     // modify the starred count & make sure the correct image is used
                     var newStarCount = starredCount + starAmt;
+                    var newAnno = 'icon-annotation';
                     if (newStarCount > 0) {
-                        var newImg = 'plugins/Morpheus/images/annotations_starred.png';
-                    } else {
-                        var newImg = 'plugins/Morpheus/images/annotations.png';
+                        newAnno += ' starred';
                     }
-                    $(this).attr('data-starred', newStarCount).find('img').attr('src', newImg);
+                    $(this).attr('data-starred', newStarCount).find('span').attr('class', newAnno);
 
                     // modify the annotation count & hide/show based on new count
                     var newCount = annotationCount + amt;
@@ -575,12 +575,12 @@
 
         // if no graph available, hide all icons
         if (!canvases || canvases.length == 0) {
-            $('span', annotations).hide();
+            $('span[data-date]', annotations).hide();
             return true;
         }
 
         // set position of each individual icon
-        $('span', annotations).each(function (i) {
+        $('span[data-date]', annotations).each(function (i) {
             var canvas = $(canvases[i]),
                 canvasCenterX = canvas.position().left + (canvas.width() / 2);
             $(this).css({

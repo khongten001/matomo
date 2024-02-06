@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Tests\System;
@@ -39,7 +39,7 @@ class CliMultiTest extends SystemTestCase
      */
     private $responses = array();
 
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
@@ -66,11 +66,9 @@ class CliMultiTest extends SystemTestCase
         $this->assertEquals(array(), $response);
     }
 
-    /**
-     * @expectedException PHPUnit_Framework_Error
-     */
     public function test_request_shouldFail_IfUrlsIsNotAnArray()
     {
+        $this->expectException('TypeError');
         $this->cliMulti->request('');
     }
 
@@ -144,7 +142,7 @@ class CliMultiTest extends SystemTestCase
     {
         $this->cliMulti->runAsSuperUser();
         $response = $this->cliMulti->request(array($this->completeUrl('')));
-        $this->assertContains('Error: no website was found', $response[0]);
+        self::assertStringContainsString('Error: no website was found', $response[0]);
     }
 
     public function test_request_shouldBeAbleToRenderARegularPageInPiwik()
@@ -155,9 +153,9 @@ class CliMultiTest extends SystemTestCase
 
         $response = $this->cliMulti->request($urls);
 
-        $message = "Response was: " . substr( implode("\n\n", $response), 0, 4000);
+        $message = "Response was: " . substr(implode("\n\n", $response), 0, 4000);
         $this->assertTrue(false !== strpos($response[0], '<meta name="generator" content="Matomo - free/libre analytics platform"/>'), $message);
-        $this->assertTrue(false !== strpos($response[0], 'Widgetize the full dashboard'). $message);
+        $this->assertTrue(false !== strpos($response[0], 'Widgetize the full dashboard') . $message);
     }
 
     public function test_shouldFallback_IfAsyncIsNotSupported()
@@ -213,7 +211,7 @@ class CliMultiTest extends SystemTestCase
     {
         $actualResponse = $this->cliMulti->request($urls);
 
-        $this->assertInternalType('array', $actualResponse);
+        self::assertIsArray($actualResponse, '$actualResponse is not an array');
         $this->assertCount(count($expectedResponseIds), $actualResponse);
 
         $expected = array();
@@ -250,8 +248,8 @@ class CliMultiTest extends SystemTestCase
     {
         $dir = PIWIK_INCLUDE_PATH . '/tmp';
 
-        $files = \_glob($dir . "/*", null);
-        $subFiles = \_glob($dir . "/*/*", null);
+        $files = \_glob($dir . "/*");
+        $subFiles = \_glob($dir . "/*/*");
 
         $files = array_merge($files, $subFiles);
 

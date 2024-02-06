@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Tests\Fixtures;
@@ -21,7 +21,7 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
     public $idSite2 = 2;
     public $idGoalStandard = 1;
 
-    public function setUp()
+    public function setUp(): void
     {
         $this->setUpWebsitesAndGoals();
         self::setUpScheduledReports($this->idSite);
@@ -30,7 +30,7 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
         $this->trackVisitsSite2($url = 'http://example-site2.com/index.htm');
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         // empty
     }
@@ -38,7 +38,7 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
     private function setUpWebsitesAndGoals()
     {
         if (!self::siteCreated($this->idSite)) {
-            $this->idSite = self::createWebsite($this->dateTime, $ecommerce = 1);
+            $this->idSite = self::createWebsite($this->dateTime, $ecommerce = 1, 'A very long name for a very tiny test site, that also reaches the 90 character limit fully');
         }
 
         if (!self::siteCreated($this->idSite2)) {
@@ -66,10 +66,6 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
         $t->setEcommerceView('SKU2', 'PRODUCT name', $category, $price);
         $t->setCustomVariable(5, 'VisitorType', 'NewLoggedOut', 'visit');
         $t->setCustomVariable(4, 'ValueIsZero', '0', 'visit');
-        self::assertEquals(array('_pks', 'SKU2'), $t->getCustomVariable(3, 'page'));
-        self::assertEquals(array('_pkn', 'PRODUCT name'), $t->getCustomVariable(4, 'page'));
-        self::assertEquals(array('_pkc', $category), $t->getCustomVariable(5, 'page'));
-        self::assertEquals(array('_pkp', $price), $t->getCustomVariable(2, 'page'));
         self::assertEquals(array('VisitorType', 'NewLoggedOut'), $t->getCustomVariable(5, 'visit'));
 
         // this is also a goal conversion (visitConvertedGoalId==1)
@@ -85,13 +81,13 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
         self::checkResponse($t->doTrackPageView('Another Product page with no category'));
 
         $t->setForceVisitDateTime(Date::factory($this->dateTime)->addHour(0.2)->getDatetime());
-        $t->setEcommerceView($sku = 'SKU VERY nice indeed', $name = 'PRODUCT name', $categories = array('Multiple Category 1', '', 0, 'Multiple Category 2', 'Electronics & Cameras', 'Multiple Category 4', 'Multiple Category 5', 'SHOULD NOT BE REPORTEDSSSSSSSSSSSSSSssssssssssssssssssssssssssstttttttttttttttttttttttuuuu!'));
+        $t->setEcommerceView($sku = 'SKU VERY nice indeed', $name = 'PRODUCT name', $categories = ['Multiple Category 1', '', 0, 'Multiple Category 2', 'Electronics & Cameras', 'Multiple Category 4', 'Multiple Category 5', 'SHOULD NOT BE REPORTEDSSSSSSSSSSSSSSssssssssssssssssssssssssssstttttttttttttttttttttttuuuu!']);
         self::checkResponse($t->doTrackPageView('Another Product page with multiple categories'));
 
         // VISIT NO 2
 
         // Fake the returning visit cookie
-        $t->setDebugStringAppend("&_idvc=2");
+        // TODO: can't do this w/ idvc, should be fine for a test
         $t->setBrowserLanguage('pl');
 
         // VIEW category page
@@ -111,6 +107,15 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
 
         // ADD TO CART
         $t->setForceVisitDateTime(Date::factory($this->dateTime)->addHour(1.9)->getDatetime());
+        $t->setCustomVariable(3, 'VisitorName', 'Great name!', 'visit');
+        $t->addEcommerceItem($sku = 'SKU VERY nice indeed', $name = 'PRODUCT name', $category = 'Electronics & Cameras', $price = 500, $quantity = 1);
+        $t->addEcommerceItem($sku = 'SKU VERY nice indeed', $name = 'PRODUCT name', $category = 'Electronics & Cameras', $price = 500, $quantity = 2);
+        $t->addEcommerceItem($sku = 'SKU VERY nice indeed REMOVED', $name = 'PRODUCT name REMOVED', $category = 'Electronics & Cameras REMOVED', $price = 300, $quantity = 1);
+        $t->addEcommerceItem($sku = 'SKU WILL BE DELETED', $name = 'BLABLA DELETED', $category = '', $price = 5000000, $quantity = 20);
+        self::checkResponse($t->doTrackEcommerceCartUpdate($grandTotal = 1300));
+
+        // REMOVE FROM CART
+        $t->setForceVisitDateTime(Date::factory($this->dateTime)->addHour(1.95)->getDatetime());
         $t->setCustomVariable(3, 'VisitorName', 'Great name!', 'visit');
         $t->addEcommerceItem($sku = 'SKU VERY nice indeed', $name = 'PRODUCT name', $category = 'Electronics & Cameras', $price = 500, $quantity = 1);
         $t->addEcommerceItem($sku = 'SKU VERY nice indeed', $name = 'PRODUCT name', $category = 'Electronics & Cameras', $price = 500, $quantity = 2);
@@ -144,7 +149,7 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
         // we test that both the order, and the products, are not updated on subsequent "Receipt" views
         $t->setForceVisitDateTime(Date::factory($this->dateTime)->addHour(2.2)->getDatetime());
         $t->addEcommerceItem($sku = 'SKU2', $name = 'Canon SLR NOT!', $category = 'Electronics & Cameras NOT!', $price = 15000000000, $quantity = 10000);
-        self::checkResponse($t->doTrackEcommerceOrder($orderId2, $grandTotal = 20000000, $subTotal = 1500, $tax = 400, $shipping = 100, $discount = 0));
+        self::checkTrackingFailureResponse($t->doTrackEcommerceOrder($orderId2, $grandTotal = 20000000, $subTotal = 1500, $tax = 400, $shipping = 100, $discount = 0));
 
         // Leave with an opened cart
         // No category
@@ -155,11 +160,10 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
         // Record the same visit leaving twice an abandoned cart
         foreach (array(0, 5, 24) as $offsetHour) {
             $t->setForceVisitDateTime(Date::factory($this->dateTime)->addHour($offsetHour + 2.4)->getDatetime());
-            // Also recording an order the day after
+            // Also recording an order the day after (purposefully using old order ID, it should be ignored by the tracker since it was used in a previous visit)
             if ($offsetHour >= 24) {
-                $t->setDebugStringAppend("&_idvc=1");
                 $t->addEcommerceItem($sku = 'SKU2', $name = 'Canon SLR', $category = 'Electronics & Cameras', $price = 1500, $quantity = 1);
-                self::checkResponse($t->doTrackEcommerceOrder($orderId2, $grandTotal = 20000000, $subTotal = 1500, $tax = 400, $shipping = 100, $discount = 0));
+                self::checkTrackingFailureResponse($t->doTrackEcommerceOrder($orderId2, $grandTotal = 20000000, $subTotal = 1500, $tax = 400, $shipping = 100, $discount = 0));
             }
 
             // VIEW PRODUCT PAGES
@@ -172,13 +176,13 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
             self::checkResponse($t->doTrackPageView("View product left in cart"));
 
             $t->setForceVisitDateTime(Date::factory($this->dateTime)->addHour($offsetHour + 2.6)->getDatetime());
-            $t->setEcommerceView($sku = 'SKU IN ABANDONED CART TWO', $name = 'PRODUCT TWO LEFT in cart', $category = 'Category TWO LEFT in cart');
+            $t->setEcommerceView($sku = 'SKU IN ABANDONED CART TWO', $name = 'PRODUCT TWO LEFT in cart', $category = ['Category TWO LEFT in cart', 'second category']);
             self::checkResponse($t->doTrackPageView("View product left in cart"));
 
             // ABANDONED CART
             $t->setForceVisitDateTime(Date::factory($this->dateTime)->addHour($offsetHour + 2.7)->getDatetime());
             $t->addEcommerceItem($sku = 'SKU IN ABANDONED CART ONE', $name = 'PRODUCT ONE LEFT in cart', $category = '', $price = 500.11111112, $quantity = 1);
-            $t->addEcommerceItem($sku = 'SKU IN ABANDONED CART TWO', $name = 'PRODUCT TWO LEFT in cart', $category = 'Category TWO LEFT in cart', $price = 1000, $quantity = 2);
+            $t->addEcommerceItem($sku = 'SKU IN ABANDONED CART TWO', $name = 'PRODUCT TWO LEFT in cart', $category = ['Category TWO LEFT in cart', 'second category'], $price = 1000, $quantity = 2);
             $t->addEcommerceItem($sku = 'SKU VERY nice indeed', $name = 'PRODUCT THREE LEFT in cart', $category = 'Electronics & Cameras', $price = 10, $quantity = 1);
             self::checkResponse($t->doTrackEcommerceCartUpdate($grandTotal = 2510.11111112));
         }
@@ -191,6 +195,7 @@ class TwoSitesEcommerceOrderWithItems extends Fixture
         // One more Ecommerce order, without any product in it, because we still track orders without products
         $t->setForceVisitDateTime(Date::factory($this->dateTime)->addHour(30.8)->getDatetime());
         self::checkResponse($t->doTrackEcommerceOrder($orderId4, $grandTotal = 10000));
+
         return array($defaultInit, $t, $category, $price, $sku, $name, $quantity, $grandTotal, $orderId);
     }
 

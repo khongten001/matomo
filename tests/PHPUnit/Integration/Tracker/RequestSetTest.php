@@ -1,31 +1,26 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Integration\Tracker;
 
-use Piwik\EventDispatcher;
 use Piwik\Piwik;
 use Piwik\Tests\Framework\Fixture;
+use Piwik\Tracker\Request;
 use Piwik\Tracker\RequestSet;
 use Piwik\Tests\Framework\TestCase\IntegrationTestCase;
 
-class TestRequestSet extends RequestSet {
-
+class TestRequestSet extends RequestSet
+{
     private $redirectUrl = '';
 
-    public function setRedirectUrl($url)
+    public function getAllSiteIdsWithinRequest()
     {
-        $this->redirectUrl = $url;
-    }
-
-    public function getRedirectUrl()
-    {
-        return $this->redirectUrl;
+        return parent::getAllSiteIdsWithinRequest();
     }
 }
 /**
@@ -41,13 +36,23 @@ class RequestSetTest extends IntegrationTestCase
     private $requestSet;
     private $get;
     private $post;
+    private $time;
 
-    public function setUp()
+    protected static function beforeTableDataCached()
     {
-        parent::setUp();
+        parent::beforeTableDataCached();
 
         Fixture::createWebsite('2014-01-01 00:00:00');
         Fixture::createWebsite('2014-01-01 00:00:00', 0, false, 'http://www.example.com');
+
+        foreach (range(3, 10) as $idSite) {
+            Fixture::createWebsite('2014-01-01 00:00:00');
+        }
+    }
+
+    public function setUp(): void
+    {
+        parent::setUp();
 
         $this->requestSet = $this->buildNewRequestSetThatIsNotInitializedYet();
         $this->requestSet->setRequests(array(array('idsite' => 1), array('idsite' => 2)));
@@ -55,11 +60,13 @@ class RequestSetTest extends IntegrationTestCase
         $this->get  = $_GET;
         $this->post = $_POST;
 
+        $this->time = time();
+
         $_GET  = array();
         $_POST = array();
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         $_GET  = $this->get;
         $_POST = $this->post;
@@ -67,47 +74,52 @@ class RequestSetTest extends IntegrationTestCase
         parent::tearDown();
     }
 
-    public function test_shouldPerformRedirectToUrl_shouldNotRedirect_IfNoUrlIsSet()
+    public function test_getAllSiteIdsWithinRequest_ShouldReturnEmptyArray_IfNoRequestsSet()
     {
-        $this->assertFalse($this->requestSet->shouldPerformRedirectToUrl());
+        $this->requestSet = $this->buildNewRequestSetThatIsNotInitializedYet();
+        $this->assertEquals(array(), $this->requestSet->getAllSiteIdsWithinRequest());
     }
 
-    public function test_shouldPerformRedirectToUrl_shouldNotRedirect_IfUrlIsSetButNoRequests()
+    public function test_getAllSiteIdsWithinRequest_ShouldReturnTheSiteIds_FromRequests()
     {
-        $this->requestSet->setRedirectUrl('http://localhost');
-        $this->assertEquals('http://localhost', $this->requestSet->getRedirectUrl());
+        $this->requestSet->setRequests($this->buildRequests(3));
 
-        $this->requestSet->setRequests(array());
-
-        $this->assertFalse($this->requestSet->shouldPerformRedirectToUrl());
+        $this->assertEquals(array(1, 2, 3), $this->requestSet->getAllSiteIdsWithinRequest());
     }
 
-    public function test_shouldPerformRedirectToUrl_shouldNotRedirect_IfUrlHasNoHostOrIsNotUrl()
+    public function test_getAllSiteIdsWithinRequest_ShouldReturnUniqueSiteIds_Unordered()
     {
-        $this->requestSet->setRedirectUrl('abc');
+        $this->requestSet->setRequests(array(
+            $this->buildRequest(1),
+            $this->buildRequest(5),
+            $this->buildRequest(1),
+            $this->buildRequest(2),
+            $this->buildRequest(2),
+            $this->buildRequest(9),
+        ));
 
-        $this->assertFalse($this->requestSet->shouldPerformRedirectToUrl());
+        $this->assertEquals(array(1, 5, 2, 9), $this->requestSet->getAllSiteIdsWithinRequest());
     }
 
-    public function test_shouldPerformRedirectToUrl_shouldNotRedirect_IfUrlIsNotWhitelistedInAnySiteId()
+    /**
+     * @param int $numRequests
+     * @return Request[]
+     */
+    private function buildRequests($numRequests)
     {
-        $this->requestSet->setRedirectUrl('http://example.org');
-
-        $this->assertFalse($this->requestSet->shouldPerformRedirectToUrl());
+        $requests = array();
+        for ($index = 1; $index <= $numRequests; $index++) {
+            $requests[] = $this->buildRequest($index);
+        }
+        return $requests;
     }
 
-    public function test_shouldPerformRedirectToUrl_shouldRedirect_IfUrlIsGivenAndWhitelistedInAnySiteId()
+    private function buildRequest($idsite)
     {
-        $this->requestSet->setRedirectUrl('http://www.example.com');
+        $request = new Request(array('idsite' => ('' . $idsite)));
+        $request->setCurrentTimestamp($this->time);
 
-        $this->assertEquals('http://www.example.com', $this->requestSet->shouldPerformRedirectToUrl());
-    }
-
-    public function test_shouldPerformRedirectToUrl_shouldRedirect_IfBaseDomainIsGivenAndWhitelistedInAnySiteId()
-    {
-        $this->requestSet->setRedirectUrl('http://example.com');
-
-        $this->assertEquals('http://example.com', $this->requestSet->shouldPerformRedirectToUrl());
+        return $request;
     }
 
     public function test_initRequestsAndTokenAuth_shouldTriggerEventToInitRequestsButOnlyOnce()

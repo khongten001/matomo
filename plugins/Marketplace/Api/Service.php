@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -132,7 +132,7 @@ class Service
 
         $response = $this->download($url);
 
-        $result = json_decode($response, true);
+        $result = json_decode($response ?? '', true);
 
         if (is_null($result)) {
             $message = sprintf('There was an error reading the response from the Marketplace: Please try again later.');
@@ -154,5 +154,4 @@ class Service
     {
         return $this->domain;
     }
-
 }

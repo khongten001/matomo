@@ -1,19 +1,21 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik;
 
+use Exception;
+use Monolog\Handler\FingersCrossedHandler;
 use Piwik\Application\Environment;
 use Piwik\Config\ConfigNotFoundException;
 use Piwik\Container\StaticContainer;
 use Piwik\Plugin\Manager as PluginManager;
 use Piwik\Plugins\Monolog\Handler\FailureLogMessageDetector;
-use Piwik\Version;
+use Piwik\Log\LoggerInterface;
 use Symfony\Bridge\Monolog\Handler\ConsoleHandler;
 use Symfony\Component\Console\Application;
 use Symfony\Component\Console\Command\Command;
@@ -44,15 +46,6 @@ class Console extends Application
 
         $this->getDefinition()->addOption($option);
 
-        // @todo  Remove this alias in Matomo 4.0
-        $option = new InputOption('piwik-domain',
-            null,
-            InputOption::VALUE_OPTIONAL,
-            '[DEPRECATED] Matomo URL (protocol and domain) eg. "http://matomo.example.org"'
-        );
-
-        $this->getDefinition()->addOption($option);
-
         $option = new InputOption('xhprof',
             null,
             InputOption::VALUE_NONE,
@@ -60,9 +53,60 @@ class Console extends Application
         );
 
         $this->getDefinition()->addOption($option);
+
+        $option = new InputOption('ignore-warn', null, InputOption::VALUE_NONE,
+            'Return 0 exit code even if there are warning logs or error logs detected in the command output.');
+
+        $this->getDefinition()->addOption($option);
+    }
+
+    public function renderThrowable(\Throwable $e, OutputInterface $output): void
+    {
+        $logHandlers = StaticContainer::get('log.handlers');
+
+        $hasFingersCrossed = false;
+        foreach ($logHandlers as $handler) {
+            if ($handler instanceof FingersCrossedHandler) {
+                $hasFingersCrossed = true;
+                break;
+            }
+        }
+
+        if ($hasFingersCrossed && !$output->isVerbose()) {
+            $output->setVerbosity(OutputInterface::VERBOSITY_VERBOSE);
+        }
+
+        parent::renderThrowable($e, $output);
     }
 
     public function doRun(InputInterface $input, OutputInterface $output)
+    {
+        try {
+            return $this->doRunImpl($input, $output);
+        } catch (\Exception $ex) {
+            try {
+                FrontController::generateSafeModeOutputFromException($ex);
+            } catch (\Exception $ex) {
+                // ignore, we re-throw the original exception, not a wrapped one
+            }
+
+            throw $ex;
+        }
+    }
+
+    /**
+     * Makes parent doRun method available
+     *
+     * @param InputInterface  $input
+     * @param OutputInterface $output
+     * @return int
+     */
+    public function originDoRun(InputInterface $input, OutputInterface $output)
+    {
+        return parent::doRun($input, $output);
+    }
+
+    private function doRunImpl(InputInterface $input, OutputInterface $output)
     {
         if ($input->hasParameterOption('--xhprof')) {
             Profiler::setupProfilerXHProf(true, true);
@@ -79,19 +123,34 @@ class Console extends Application
             Log::warning($e->getMessage());
         }
 
+        $this->initAuth();
+
         $commands = $this->getAvailableCommands();
 
         foreach ($commands as $command) {
             $this->addCommandIfExists($command);
         }
 
-        $self = $this;
-        $exitCode = Access::doAsSuperUser(function () use ($input, $output, $self) {
-            return call_user_func(array($self, 'Symfony\Component\Console\Application::doRun'), $input, $output);
-        });
+        $exitCode = null;
+
+        /**
+         * @ignore
+         */
+        Piwik::postEvent('Console.doRun', [&$exitCode, $input, $output]);
+
+        if ($exitCode === null) {
+            $self = $this;
+            $exitCode = Access::doAsSuperUser(function () use ($input, $output, $self) {
+                return
+                    call_user_func(array($self, 'originDoRun'), $input, $output);
+            });
+        }
 
         $importantLogDetector = StaticContainer::get(FailureLogMessageDetector::class);
-        if ($exitCode === 0 && $importantLogDetector->hasEncounteredImportantLog()) {
+        if (!$input->hasParameterOption('--ignore-warn')
+            && $exitCode === 0
+            && $importantLogDetector->hasEncounteredImportantLog()
+        ) {
             $output->writeln("Error: error or warning logs detected, exit 1");
             $exitCode = 1;
         }
@@ -107,7 +166,7 @@ class Console extends Application
             Log::warning(sprintf('Cannot add command %s, class does not extend Piwik\Plugin\ConsoleCommand', $command));
         } else {
             /** @var Command $commandInstance */
-            $commandInstance = new $command;
+            $commandInstance = new $command();
 
             // do not add the command if it already exists; this way we can add the command ourselves in tests
             if (!$this->has($commandInstance->getName())) {
@@ -180,10 +239,6 @@ class Console extends Application
         $matomoHostname = $input->getParameterOption('--matomo-domain');
 
         if (empty($matomoHostname)) {
-            $matomoHostname = $input->getParameterOption('--piwik-domain');
-        }
-
-        if (empty($matomoHostname)) {
             $matomoHostname = $input->getParameterOption('--url');
         }
 
@@ -250,5 +305,19 @@ class Console extends Application
             $commands = array_merge($commands, $instance->findMultipleComponents('Commands', 'Piwik\\Plugin\\ConsoleCommand'));
         }
         return $commands;
+    }
+
+    private function initAuth()
+    {
+        Piwik::postEvent('Request.initAuthenticationObject');
+        try {
+            StaticContainer::get('Piwik\Auth');
+        } catch (Exception $e) {
+            $message = "Authentication object cannot be found in the container. Maybe the Login plugin is not activated?
+                        You can activate the plugin by adding:
+                        Plugins[] = Login
+                        under the [Plugins] section in your config/config.ini.php";
+            StaticContainer::get(LoggerInterface::class)->warning($message);
+        }
     }
 }

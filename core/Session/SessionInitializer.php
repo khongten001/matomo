@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -83,7 +83,12 @@ class SessionInitializer
     protected function processSuccessfulSession(AuthResult $authResult)
     {
         $sessionIdentifier = new SessionFingerprint();
-        $sessionIdentifier->initialize($authResult->getIdentity());
+        $sessionIdentifier->initialize($authResult->getIdentity(), $authResult->getTokenAuth(), $this->isRemembered());
+
+        /**
+         * @ignore
+         */
+        Piwik::postEvent('Login.authenticate.processSuccessfulSession.end', array($authResult->getIdentity()));
     }
 
     protected function regenerateSessionId()
@@ -91,16 +96,9 @@ class SessionInitializer
         Session::regenerateId();
     }
 
-    /**
-     * Accessor to compute the hashed authentication token.
-     *
-     * @param string $login user login
-     * @param string $token_auth authentication token
-     * @return string hashed authentication token
-     * @deprecated
-     */
-    public static function getHashTokenAuth($login, $token_auth)
+    private function isRemembered()
     {
-        return md5($login . $token_auth);
+        $cookieParams = session_get_cookie_params();
+        return $cookieParams['lifetime'] > 0;
     }
 }

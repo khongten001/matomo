@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -13,22 +13,26 @@ use Piwik\ArchiveProcessor\Rules;
 use Piwik\Common;
 use Piwik\Config;
 use Piwik\Container\StaticContainer;
+use Piwik\DataTable;
+use Piwik\DataTable\Manager;
+use Piwik\Date;
 use Piwik\Db;
 use Piwik\DbHelper;
 use Piwik\Http;
+use Piwik\Period;
+use Piwik\Piwik;
+use Piwik\Plugin\ProcessedMetric;
 use Piwik\ReportRenderer;
-use Piwik\Tests\Framework\Constraint\ResponseCode;
-use Piwik\Tests\Framework\Constraint\HttpResponseText;
+use Piwik\Site;
+use Piwik\Tests\Framework\Mock\File as MockFileMethods;
 use Piwik\Tests\Framework\TestRequest\ApiTestConfig;
 use Piwik\Tests\Framework\TestRequest\Collection;
 use Piwik\Tests\Framework\TestRequest\Response;
 use Piwik\Log;
-use PHPUnit_Framework_TestCase;
+use PHPUnit\Framework\TestCase;
 use Piwik\Tests\Framework\Fixture;
 use Piwik\Translation\Translator;
 use Piwik\Url;
-
-require_once PIWIK_INCLUDE_PATH . '/libs/PiwikTracker/PiwikTracker.php';
 
 /**
  * Base class for System tests.
@@ -37,7 +41,7 @@ require_once PIWIK_INCLUDE_PATH . '/libs/PiwikTracker/PiwikTracker.php';
  *
  * @since 2.8.0
  */
-abstract class SystemTestCase extends PHPUnit_Framework_TestCase
+abstract class SystemTestCase extends TestCase
 {
     /**
      * Identifies the last language used in an API/Controller call.
@@ -54,9 +58,50 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
      */
     public static $fixture;
 
-    public static function setUpBeforeClass()
+    private static $allowedModulesApiWise = array();
+    private static $allowedCategoriesApiWise = array();
+    private static $apisToFilterResponse = array(
+        'API.getReportMetadata' => array(
+            'actionName' => 'API.getReportMetadata.end',
+            'filterKey' => 'module'
+        ),
+        'API.getSegmentsMetadata' => array(
+            'actionName' => 'API.API.getSegmentsMetadata.end',
+            'filterKey' => 'category'
+        ),
+        'API.getReportPagesMetadata' => array(
+            'actionName' => 'API.API.getReportPagesMetadata.end',
+            'filterKey' => 'category'
+        ),
+        'API.getWidgetMetadata' => array(
+            'actionName' => 'API.API.getWidgetMetadata.end',
+            'filterKey' => 'module'
+        ),
+    );
+
+    private static $shouldFilterApiResponse = false;
+
+    public function setGroups(array $groups): void
+    {
+        $pluginName = explode('\\', get_class($this));
+        if (!empty($pluginName[2]) && !empty($pluginName[1]) && $pluginName[1] === 'Plugins') {
+            // we assume \Piwik\Plugins\PluginName nanmespace...
+            if (!in_array($pluginName[2], $groups, true)) {
+                $groups[] = $pluginName[2];
+            }
+        }
+
+        parent::setGroups($groups);
+    }
+
+    public static function setUpBeforeClass(): void
     {
         Log::debug("Setting up " . get_called_class());
+
+        // NOTE: it is important to reference this class in a test framework class like Fixture so the mocks
+        // will be loaded before any testable classed load, otherwise some tests may fail w/o any obvious reason.
+        // (the actual reason being )
+        MockFileMethods::reset();
 
         if (!isset(static::$fixture)) {
             $fixture = new Fixture();
@@ -77,9 +122,23 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
         } catch (Exception $e) {
             static::fail("Failed to setup fixture: " . $e->getMessage() . "\n" . $e->getTraceAsString());
         }
+
+        foreach (self::$apisToFilterResponse as $api => $apiValue) {
+            Piwik::addAction($apiValue['actionName'], function (&$reports, $info) use ($api, $apiValue) {
+                $filterValues = array();
+                if ($apiValue['filterKey'] === 'module') {
+                    $filterValues = self::getAllowedModulesToFilterApiResponse($api);
+                } else if ($apiValue['filterKey'] === 'category') {
+                    $filterValues = self::getAllowedCategoriesToFilterApiResponse($api);
+                }
+                if ($filterValues && self::$shouldFilterApiResponse) {
+                    self::filterReportsCallback($reports, $info, $api, $apiValue['filterKey'], $filterValues);
+                }
+            });
+        }
     }
 
-    public static function tearDownAfterClass()
+    public static function tearDownAfterClass(): void
     {
         Log::debug("Tearing down " . get_called_class());
 
@@ -89,6 +148,9 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
             $fixture = static::$fixture;
         }
 
+        self::$allowedModulesApiWise = array();
+        self::$allowedCategoriesApiWise = array();
+
         $fixture->performTearDown();
     }
 
@@ -96,37 +158,15 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
      * Returns true if continuous integration running this request
      * Useful to exclude tests which may fail only on this setup
      */
-    public static function isTravisCI()
+    public static function isCIEnvironment(): bool
     {
-        $travis = getenv('TRAVIS');
-        return !empty($travis);
-    }
-
-    public static function isPhpVersion53()
-    {
-        return strpos(PHP_VERSION, '5.3') === 0;
-    }
-
-    public static function isPhp7orLater()
-    {
-        return version_compare('7.0.0-dev', PHP_VERSION) < 1;
+        $githubAction = getenv('CI');
+        return !empty($githubAction);
     }
 
     public static function isMysqli()
     {
         return getenv('MYSQL_ADAPTER') == 'MYSQLI';
-    }
-
-    protected function alertWhenImagesExcludedFromTests()
-    {
-        if (!Fixture::canImagesBeIncludedInScheduledReports()) {
-            $this->markTestSkipped(
-                '(This should not occur on Travis CI server as we expect these tests to run there). Scheduled reports generated during integration tests will not contain the image graphs. ' .
-                    'For tests to generate images, use a machine with the following specifications : ' .
-                    'OS = '.Fixture::IMAGES_GENERATED_ONLY_FOR_OS.', PHP = '.Fixture::IMAGES_GENERATED_FOR_PHP .
-                    ' and GD = ' . Fixture::IMAGES_GENERATED_FOR_GD
-            );
-        }
     }
 
     /**
@@ -149,7 +189,7 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
             array(
                 'ScheduledReports.generateReport',
                 array(
-                    'testSuffix'             => '_scheduled_report_in_html_tables_only',
+                    'testSuffix'             => '_schedrep_html_tables_only',
                     'date'                   => $dateTime,
                     'periods'                => array($period),
                     'format'                 => 'original',
@@ -157,7 +197,8 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
                     'otherRequestParameters' => array(
                         'idReport'     => 1,
                         'reportFormat' => ReportRenderer::HTML_FORMAT,
-                        'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN
+                        'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                        'serialize' => 0,
                     )
                 )
             )
@@ -169,7 +210,7 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
             array(
                 'ScheduledReports.generateReport',
                 array(
-                    'testSuffix'             => '_scheduled_report_in_csv',
+                    'testSuffix'             => '_schedrep_in_csv',
                     'date'                   => $dateTime,
                     'periods'                => array($period),
                     'format'                 => 'original',
@@ -177,7 +218,29 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
                     'otherRequestParameters' => array(
                         'idReport'     => 1,
                         'reportFormat' => ReportRenderer::CSV_FORMAT,
-                        'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN
+                        'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                        'serialize' => 0,
+                    )
+                )
+            )
+        );
+
+        // TSV Scheduled Report
+        array_push(
+            $apiCalls,
+            array(
+                'ScheduledReports.generateReport',
+                array(
+                    'testSuffix'             => '_schedrep_in_tsv',
+                    'date'                   => $dateTime,
+                    'periods'                => array($period),
+                    'format'                 => 'original',
+                    'fileExtension'          => 'tsv',
+                    'otherRequestParameters' => array(
+                        'idReport'     => 1,
+                        'reportFormat' => ReportRenderer::TSV_FORMAT,
+                        'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                        'serialize' => 0,
                     )
                 )
             )
@@ -191,7 +254,7 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
                 array(
                      'ScheduledReports.generateReport',
                      array(
-                         'testSuffix'             => '_scheduled_report_in_pdf_tables_only',
+                         'testSuffix'             => '_schedrep_in_pdf_tables_only',
                          'date'                   => $dateTime,
                          'periods'                => array($period),
                          'format'                 => 'original',
@@ -199,7 +262,8 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
                          'otherRequestParameters' => array(
                              'idReport'     => 1,
                              'reportFormat' => ReportRenderer::PDF_FORMAT,
-                             'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN
+                             'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                             'serialize' => 0,
                          )
                      )
                 )
@@ -212,14 +276,15 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
             array(
                  'ScheduledReports.generateReport',
                  array(
-                     'testSuffix'             => '_scheduled_report_via_sms_one_site',
+                     'testSuffix'             => '_schedrep_via_sms_one_site',
                      'date'                   => $dateTime,
                      'periods'                => array($period),
                      'format'                 => 'original',
                      'fileExtension'          => 'sms.txt',
                      'otherRequestParameters' => array(
                          'idReport'   => 2,
-                         'outputType' => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN
+                         'outputType' => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                         'serialize' => 0,
                      )
                  )
             )
@@ -231,14 +296,15 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
             array(
                  'ScheduledReports.generateReport',
                  array(
-                     'testSuffix'             => '_scheduled_report_via_sms_all_sites',
+                     'testSuffix'             => '_schedrep_via_sms_all_sites',
                      'date'                   => $dateTime,
                      'periods'                => array($period),
                      'format'                 => 'original',
                      'fileExtension'          => 'sms.txt',
                      'otherRequestParameters' => array(
                          'idReport'   => 3,
-                         'outputType' => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN
+                         'outputType' => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                         'serialize' => 0,
                      )
                  )
             )
@@ -251,7 +317,7 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
                 array(
                      'ScheduledReports.generateReport',
                      array(
-                         'testSuffix'             => '_scheduled_report_in_html_tables_and_graph',
+                         'testSuffix'             => '_schedrep_html_tables_and_graph',
                          'date'                   => $dateTime,
                          'periods'                => array($period),
                          'format'                 => 'original',
@@ -259,7 +325,8 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
                          'otherRequestParameters' => array(
                              'idReport'     => 4,
                              'reportFormat' => ReportRenderer::HTML_FORMAT,
-                             'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN
+                             'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                             'serialize' => 0,
                          )
                      )
                 )
@@ -271,16 +338,57 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
                 array(
                      'ScheduledReports.generateReport',
                      array(
-                         'testSuffix'             => '_scheduled_report_in_html_row_evolution_graph',
+                         'testSuffix'             => '_schedrep_html_row_evolution_graph',
                          'date'                   => $dateTime,
                          'periods'                => array($period),
                          'format'                 => 'original',
                          'fileExtension'          => 'html',
                          'otherRequestParameters' => array(
                              'idReport'     => 5,
-                             'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN
+                             'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                             'serialize' => 0,
                          )
                      )
+                )
+            );
+
+            // row evolution w/ custom previousN
+            array_push(
+                $apiCalls,
+                array(
+                    'ScheduledReports.generateReport',
+                    array(
+                        'testSuffix'             => '_schedrep_html_row_evolution_prevCustomN',
+                        'date'                   => $dateTime,
+                        'periods'                => array($period),
+                        'format'                 => 'original',
+                        'fileExtension'          => 'html',
+                        'otherRequestParameters' => array(
+                            'idReport'     => 6,
+                            'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                            'serialize' => 0,
+                        )
+                    )
+                )
+            );
+
+            // row evolution w/ each in period
+            array_push(
+                $apiCalls,
+                array(
+                    'ScheduledReports.generateReport',
+                    array(
+                        'testSuffix'             => '_schedrep_html_row_evolution_overEach',
+                        'date'                   => $dateTime,
+                        'periods'                => array($period),
+                        'format'                 => 'original',
+                        'fileExtension'          => 'html',
+                        'otherRequestParameters' => array(
+                            'idReport'     => 7,
+                            'outputType'   => \Piwik\Plugins\ScheduledReports\API::OUTPUT_RETURN,
+                            'serialize' => 0,
+                        )
+                    )
                 )
             );
         }
@@ -296,13 +404,19 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
     protected function runAnyApiTest($apiMethod, $apiId, $requestParams, $options = array())
     {
         $requestParams['module'] = 'API';
-        $requestParams['format'] = 'XML';
+        if (empty($requestParams['format'])) {
+            $requestParams['format'] = 'XML';
+        }
         $requestParams['method'] = $apiMethod;
 
-        $apiId = $apiMethod . '_' . $apiId . '.xml';
+        $apiId = $apiMethod . '_' . $apiId . '.' . strtolower($requestParams['format']);
         $testName = 'test_' . static::getOutputPrefix();
 
-        list($processedFilePath, $expectedFilePath) =
+        if (!empty($options['testSuffix'])) {
+            $testName .= '_' . $options['testSuffix'];
+        }
+
+        [$processedFilePath, $expectedFilePath] =
             $this->getProcessedAndExpectedPaths($testName, $apiId, $format = null, $compareAgainst = false);
 
         if (!array_key_exists('token_auth', $requestParams)) {
@@ -370,14 +484,22 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
 
     protected function _testApiUrl($testName, $apiId, $requestUrl, $compareAgainst, $params = array())
     {
-        list($processedFilePath, $expectedFilePath) =
+        Manager::getInstance()->deleteAll(); // clearing the datatable cache here GREATLY speeds up system tests on CI
+
+        [$processedFilePath, $expectedFilePath] =
             $this->getProcessedAndExpectedPaths($testName, $apiId, $format = null, $compareAgainst);
 
         $originalGET = $_GET;
         $_GET = $requestUrl;
         unset($_GET['serialize']);
 
-        $processedResponse = Response::loadFromApi($params, $requestUrl);
+        $onlyCheckUnserialize = !empty($params['onlyCheckUnserialize']);
+
+        $apiIdExploded = explode('_', str_replace('.xml', '', $apiId));
+        $api = $apiIdExploded[0];
+        self::$shouldFilterApiResponse = !empty(self::$apisToFilterResponse[$api]);
+
+        $processedResponse = Response::loadFromApi($params, $requestUrl, $normailze = !$onlyCheckUnserialize);
         if (empty($compareAgainst)) {
             $processedResponse->save($processedFilePath);
         }
@@ -385,6 +507,36 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
         $response = $processedResponse->getResponseText();
         if (strpos($response, '<?xml') === 0) {
             $this->assertValidXML($response);
+        }
+
+        if ($onlyCheckUnserialize) {
+            if (empty($response) || is_numeric($response)) {
+                return; // pass
+            }
+
+            // check the data can be successfully unserialized, nothing else
+            try {
+                $unserialized = Common::safe_unserialize($response, [
+                    DataTable::class,
+                    DataTable\Simple::class,
+                    DataTable\Row::class,
+                    DataTable\Map::class,
+                    Site::class,
+                    Date::class,
+                    Period::class,
+                    Period\Day::class,
+                    Period\Week::class,
+                    Period\Month::class,
+                    Period\Year::class,
+                    Period\Range::class,
+                    ProcessedMetric::class,
+                ], true);
+
+                self::assertTrue($unserialized !== false, "Unknown serialization error.");
+            } catch (\Exception $ex) {
+                $this->comparisonFailures[] = new \Exception("Processed response in '$processedFilePath' could not be unserialized: " . $ex->getMessage());
+            }
+            return;
         }
 
         $_GET = $originalGET;
@@ -453,7 +605,7 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
         $expectedFilename = $compareAgainst ? ('test_' . $compareAgainst) : $testName;
         $expectedFilename .= $filenameSuffix;
 
-        list($processedDir, $expectedDir) = static::getProcessedAndExpectedDirs();
+        [$processedDir, $expectedDir] = static::getProcessedAndExpectedDirs();
 
         return array($processedDir . $processedFilename, $expectedDir . $expectedFilename);
     }
@@ -558,7 +710,7 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
             $this->fail(" ERROR: Could not find expected API output '"
                 . implode("', '", $this->missingExpectedFiles)
                 . "'. For new tests, to pass the test, you can copy files from the processed/ directory into"
-                . " $expectedDir  after checking that the output is valid. %s ");
+                . " $expectedDir  after checking that the output is valid.");
         }
 
         // Display as one error all sub-failures
@@ -570,7 +722,7 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
 
     protected function getTestRequestsCollection($api, $testConfig, $apiToCall)
     {
-       return new Collection($api, $testConfig, $apiToCall);
+        return new Collection($api, $testConfig, $apiToCall);
     }
 
     private function printComparisonFailures()
@@ -622,7 +774,11 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
     protected static function getDbTablesWithData()
     {
         $result = array();
-        foreach (DbHelper::getTablesInstalled() as $tableName) {
+        $tables = Db::fetchAll('SHOW TABLES'); // tests should be in a clean database, so we can just get all tables
+        if (!empty($tables)) {
+            $tables = array_column($tables, key($tables[0]));
+        }
+        foreach ($tables as $tableName) {
             $result[$tableName] = Db::fetchAll("SELECT * FROM `$tableName`");
         }
         return $result;
@@ -644,10 +800,13 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
         DbHelper::truncateAllTables();
 
         // insert data
-        $existingTables = DbHelper::getTablesInstalled();
+        $archiveTables = Db::fetchAll("SHOW TABLES LIKE '%archive_%'");
+        if (!empty($archiveTables)) {
+            $archiveTables = array_column($archiveTables, key($archiveTables[0]));
+        }
         foreach ($tables as $table => $rows) {
             // create table if it's an archive table
-            if (strpos($table, 'archive_') !== false && !in_array($table, $existingTables)) {
+            if (strpos($table, 'archive_') !== false && !in_array($table, $archiveTables)) {
                 $tableType = strpos($table, 'archive_numeric') !== false ? 'archive_numeric' : 'archive_blob';
 
                 $createSql = DbHelper::getTableCreateSql($tableType);
@@ -668,7 +827,8 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
                     if (is_null($value)) {
                         $values[] = 'NULL';
                     } else {
-                        $isNumeric = preg_match('/^[1-9][0-9]*$/', $value);
+                        // is_numeric cannot be used here since some strings will look like floating point numbers (eg 3e456)
+                        $isNumeric = preg_match('/^\d+(\.\d+)?$/', $value);
                         if ($isNumeric) {
                             $values[] = $value;
                         } else if (!ctype_print($value)) {
@@ -688,10 +848,7 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
                 } catch( Exception $e) {
                     throw new Exception("error while inserting $sql into $table the data. SQl data: " . var_export($sql, true) . ", Bind array: " . var_export($bind, true) . ". Erorr was -> " . $e->getMessage());
                 }
-
             }
-
-
         }
     }
 
@@ -703,25 +860,10 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
         DbHelper::deleteArchiveTables();
     }
 
-    /**
-     * @deprecated
-     */
-    public function assertHttpResponseText($expectedResponseText, $url, $message = '')
-    {
-        self::assertThat($url, new HttpResponseText($expectedResponseText), $message);
-    }
-
-    /**
-     * @deprecated
-     */
-    public function assertResponseCode($expectedResponseCode, $url, $message = '')
-    {
-        self::assertThat($url, new ResponseCode($expectedResponseCode), $message);
-    }
-
     public function assertNotDbConnectionCreated($message = 'A database connection was created but should not.')
     {
         self::assertFalse(Db::hasDatabaseObject(), $message);
+        self::assertFalse(Db::hasReaderDatabaseObject(), $message);
     }
 
     public function assertDbConnectionCreated($message = 'A database connection was not created but should.')
@@ -738,6 +880,55 @@ abstract class SystemTestCase extends PHPUnit_Framework_TestCase
     public static function provideContainerConfigBeforeClass()
     {
         return array();
+    }
+
+    public function hasDependencies(): bool
+    {
+        if (method_exists($this, 'requires')) {
+            return count($this->requires()) > 0;
+        }
+
+        return parent::hasDependencies();
+    }
+
+    public static function setAllowedModulesToFilterApiResponse($api, $category)
+    {
+        self::$allowedModulesApiWise[$api] = $category;
+    }
+
+    public static function getAllowedModulesToFilterApiResponse($api)
+    {
+        return (self::$allowedModulesApiWise[$api] ?? NULL);
+    }
+
+    public static function setAllowedCategoriesToFilterApiResponse($api, $category)
+    {
+        self::$allowedCategoriesApiWise[$api] = $category;
+    }
+
+    public static function getAllowedCategoriesToFilterApiResponse($api)
+    {
+        return (self::$allowedCategoriesApiWise[$api] ?? NULL);
+    }
+
+    private static function filterReportsCallback(&$reports, $info, $api, $filterKey, $filterValues)
+    {
+        if (!empty($reports)) {
+            foreach ($reports as $key => $row) {
+                if (
+                    !isset($row[$filterKey]) ||
+                    (
+                        is_array($row[$filterKey]) &&
+                        isset($row[$filterKey]['name']) &&
+                        !in_array($row[$filterKey]['name'], $filterValues)
+                    ) ||
+                    !is_array($row[$filterKey]) && !in_array($row[$filterKey], $filterValues)
+                ) {
+                    unset($reports[$key]);
+                }
+            }
+            $reports = array_values($reports);
+        }
     }
 }
 

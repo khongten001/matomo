@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -14,7 +14,7 @@ use Piwik\API\Request;
 use Piwik\Tests\Framework\TestCase\SystemTestCase;
 use Piwik\Url;
 use Piwik\UrlHelper;
-use \Exception;
+use Exception;
 
 /**
  * Utility class used to generate a set of API requests given API methods to call, API
@@ -29,6 +29,7 @@ class Collection
         'Dashboard',
         'UsersManager',
         'SitesManager',
+        'TagManager',
         'ExampleUI',
         'Overlay',
         'Live',
@@ -48,6 +49,9 @@ class Collection
         'CustomAlerts',
         'Insights',
         'LogViewer',
+        'Referrers.getKeywordNotDefinedString',
+        'CorePluginsAdmin.getSystemSettings',
+        'API.getPagesComparisonsDisabledFor',
     );
 
     /**
@@ -105,7 +109,7 @@ class Collection
     {
         $parametersToSet = array(
             'idSite'         => $this->testConfig->idSite,
-            'date'           => ($this->testConfig->periods == array('range') || strpos($this->testConfig->date, ',') !== false) ?
+            'date'           => ($this->testConfig->periods == array('range') || strpos($this->testConfig->date, ',') !== false || preg_match('/last[ -]?(week|month|year)/i', $this->testConfig->date) || preg_match('/(today|yesterday)/i', $this->testConfig->date)) ?
                                     $this->testConfig->date : date('Y-m-d', strtotime($this->testConfig->date)),
             'expanded'       => '1',
             'piwikUrl'       => 'http://example.org/piwik/',
@@ -161,8 +165,7 @@ class Collection
                     "Want to test APIs: " . implode(", ", $this->apiToCall) . ")\n" .
                     "But only generated these URLs: \n" . implode("\n", $requestUrls) . ")\n" .
                     "Note: SystemTestCase is meant to test API methods where the method name starts with get* \n" .
-                    "If you want to test other API methods such as add* or update* or any other, please create an IntegrationTestCase instead (via `./console generate:test`)\n"
-            );
+                    "If you want to test other API methods such as add* or update* or any other, please create an IntegrationTestCase instead (via `./console generate:test`)\n");
         }
     }
 
@@ -189,7 +192,7 @@ class Collection
         $originalDate = $parametersToSet['date'];
 
         $requestUrls = array();
-        $apiMetadata = new DocumentationGenerator;
+        $apiMetadata = new DocumentationGenerator();
 
         // Get the URLs to query against the API for all functions starting with get*
         foreach ($this->getAllApiMethods() as $apiMethodInfo) {
@@ -225,11 +228,10 @@ class Collection
                                                           'idSite'    => $parametersToSet['idSite'],
                                                           'period'    => $parametersToSet['period'],
                                                           'date'      => $parametersToSet['date'],
-                                                          'format'    => 'php',
-                                                          'serialize' => 0,
+                                                          'format'    => 'json',
                                                      ));
 
-                    $content = $request->process();
+                    $content = json_decode($request->process(), true);
                     SystemTestCase::assertApiResponseHasNoError($content);
 
                     // find first row w/ subtable
@@ -251,7 +253,9 @@ class Collection
                 foreach ($formats as $format) {
                     $parametersToSet['format'] = $format;
                     $parametersToSet['hideIdSubDatable'] = 1;
-                    $parametersToSet['serialize'] = 1;
+                    if (!isset($parametersToSet['serialize'])) {
+                        $parametersToSet['serialize'] = 1;
+                    }
 
                     $exampleUrl = $apiMetadata->getExampleUrl($class, $methodName, $parametersToSet);
                     if ($exampleUrl === false) {
@@ -296,7 +300,8 @@ class Collection
         return $result;
     }
 
-    protected function shouldSkipApiMethod($moduleName, $methodName) {
+    protected function shouldSkipApiMethod($moduleName, $methodName)
+    {
         $apiId = $moduleName . '.' . $methodName;
 
         // If Api to test were set, we only test these
@@ -309,10 +314,6 @@ class Collection
             ((strpos($methodName, 'get') !== 0 && $methodName != 'generateReport')
                 || in_array($moduleName, $this->apiNotToCall) === true
                 || in_array($apiId, $this->apiNotToCall) === true
-                || $methodName == 'getLogoUrl'
-                || $methodName == 'getSVGLogoUrl'
-                || $methodName == 'hasSVGLogo'
-                || $methodName == 'getHeaderLogoUrl'
             )
         ) { // Excluded modules from test
             return true;
@@ -338,6 +339,8 @@ class Collection
                 $this->apiNotToCall = array(
                                             'API.getMatomoVersion',
                                             'API.getPiwikVersion',
+                                            'API.getPhpVersion',
+                                            'API.getPagesComparisonsDisabledFor',
                                             'UserCountry.getLocationFromIP',
                                             'UserCountry.getCountryCodeMapping');
             } else {

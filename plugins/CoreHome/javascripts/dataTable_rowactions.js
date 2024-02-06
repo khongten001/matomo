@@ -76,6 +76,11 @@ DataTable_RowActions_Registry.register({
         if (dataTable === null && param) {
             // when row evolution is triggered from the url (not a click on the data table)
             // we look for the data table instance in the dom
+            // This actually doesn't work very good, as opening a row evolution using url params
+            // directly also triggers loading the report datatable, which might not yet be finished at
+            // this state, so the datatable might not yet be available
+            // When migrating/refactoring this it might be good to use promises in some way, so it would
+            // be possible to actually trigger the row evolution popover once the origin report was loaded.
             var report = param.split(':')[0];
             var div = $(require('piwik/UI').DataTable.getDataTableByReport(report));
             if (div.length && div.data('uiControlObject')) {
@@ -96,15 +101,12 @@ DataTable_RowActions_Registry.register({
     isAvailableOnReport: function (dataTableParams) {
         return (
             typeof dataTableParams.disable_row_evolution == 'undefined'
-                || dataTableParams.disable_row_evolution == "0"
-            ) && (
-            typeof dataTableParams.flat == 'undefined'
-                || dataTableParams.flat == "0"
-            );
+            || dataTableParams.disable_row_evolution == "0"
+        );
     },
 
     isAvailableOnRow: function (dataTableParams, tr) {
-        return true;
+        return !tr.hasClass('totalsRow');
     }
 
 });
@@ -146,8 +148,8 @@ DataTable_RowAction.prototype.initTr = function (tr) {
     // for multi-row evolution) wouldn't be possible. Also, sub-tables might have different
     // API actions. For the label filter to work, we need to use the parent action.
     // We use jQuery events to let subtables access their parents.
-    tr.bind(self.trEventName, function (e, params) {
-        self.trigger($(this), params.originalEvent, params.label);
+    tr.unbind(self.trEventName).bind(self.trEventName, function (e, params) {
+        self.trigger($(this), params.originalEvent, params.label, params.originalRow);
     });
 };
 
@@ -155,7 +157,7 @@ DataTable_RowAction.prototype.initTr = function (tr) {
  * This method is called from the click event and the tr event (see this.trEventName).
  * It derives the label and calls performAction.
  */
-DataTable_RowAction.prototype.trigger = function (tr, e, subTableLabel) {
+DataTable_RowAction.prototype.trigger = function (tr, e, subTableLabel, originalRow) {
     var label = this.getLabelFromTr(tr);
 
     // if we have received the event from the sub table, add the label
@@ -169,13 +171,17 @@ DataTable_RowAction.prototype.trigger = function (tr, e, subTableLabel) {
     if (subtable.is('.subDataTable')) {
         subtable.closest('tr').prev().trigger(this.trEventName, {
             label: label,
-            originalEvent: e
+            originalEvent: e,
+            originalRow: tr
         });
         return;
     }
 
     // ascend in action reports
-    if (subtable.closest('div.dataTableActions').length) {
+    var $dataTable = subtable.closest('div.dataTable');
+    if ($dataTable.hasClass('dataTableActions')
+      || $dataTable.data('table-type') === 'ActionsDataTable'
+    ) {
         var allClasses = tr.attr('class');
         var matches = allClasses.match(/level[0-9]+/);
         var level = parseInt(matches[0].substring(5, matches[0].length), 10);
@@ -189,18 +195,28 @@ DataTable_RowAction.prototype.trigger = function (tr, e, subTableLabel) {
                 }
                 ptr.trigger(this.trEventName, {
                     label: label,
-                    originalEvent: e
+                    originalEvent: e,
+                    originalRow: tr
                 });
                 return;
             }
         }
     }
 
-    this.performAction(label, tr, e);
+    this.performAction(label, tr, e, originalRow);
 };
 
 /** Get the label string from a tr dom element */
 DataTable_RowAction.prototype.getLabelFromTr = function (tr) {
+    if (tr.data('label')) {
+        return tr.data('label');
+    }
+
+    var rowMetadata = this.getRowMetadata(tr);
+    if (rowMetadata.combinedLabel) {
+        return '@' + rowMetadata.combinedLabel;
+    }
+
     var label = tr.find('span.label');
 
     // handle truncation
@@ -261,6 +277,8 @@ function DataTable_RowActions_RowEvolution(dataTable) {
 
     /** The rows to be compared in multi row evolution */
     this.multiEvolutionRows = [];
+    this.multiEvolutionRowsPretty = [];
+    this.multiEvolutionRowsSeries = [];
 }
 
 /** Static helper method to launch row evolution from anywhere */
@@ -271,41 +289,134 @@ DataTable_RowActions_RowEvolution.launch = function (apiMethod, label) {
 
 DataTable_RowActions_RowEvolution.prototype = new DataTable_RowAction;
 
-DataTable_RowActions_RowEvolution.prototype.performAction = function (label, tr, e) {
+DataTable_RowActions_RowEvolution.prototype.performAction = function (label, tr, e, originalRow) {
     if (e.shiftKey) {
         // only mark for multi row evolution if shift key is pressed
-        this.addMultiEvolutionRow(label);
+        this.addMultiEvolutionRow(label, $(originalRow || tr).data('comparison-series'), originalRow || tr);
         return;
     }
 
-    this.addMultiEvolutionRow(label);
+    this.addMultiEvolutionRow(label, $(originalRow || tr).data('comparison-series'), originalRow || tr);
 
     // check whether we have rows marked for multi row evolution
-    var extraParams = {};
+    var extraParams = $.extend({}, $(originalRow || tr).data('param-override'));
+    if (typeof extraParams !== 'object') {
+        extraParams = {};
+    }
+
     if (this.multiEvolutionRows.length > 1) {
         extraParams.action = 'getMultiRowEvolutionPopover';
         label = this.multiEvolutionRows.join(',');
+
+        labelPretty = this.multiEvolutionRowsPretty.join(',');
+        if (label != labelPretty) {
+            extraParams.labelPretty = labelPretty;
+        }
+
+        if (this.multiEvolutionRowsSeries.length > 1) { // when comparison is active
+            var MatomoUrl = window.CoreHome.MatomoUrl;
+            extraParams.compareDates = MatomoUrl.parsed.value.compareDates;
+            extraParams.comparePeriods = MatomoUrl.parsed.value.comparePeriods;
+            extraParams.compareSegments = MatomoUrl.parsed.value.compareSegments;
+            extraParams.labelSeries = this.multiEvolutionRowsSeries.join(',');
+
+            // remove override period/date/segment since we are sending compare params so we can have the whole set of comparison
+            // serieses for LabelFilter
+            delete extraParams.period;
+            delete extraParams.date;
+            delete extraParams.segment;
+        }
+    } else {
+      var labelPretty = this.getPrettyLabel(originalRow || tr);
+      if (labelPretty && labelPretty != label) {
+        extraParams['labelPretty'] = labelPretty;
+      }
     }
 
     $.each(this.dataTable.param, function (index, value) {
         // we automatically add fields like idDimension, idGoal etc.
-        if (index !== 'idSite' && index.indexOf('id') === 0 && $.isNumeric(value)) {
+        if (index !== 'idSite' && index.indexOf('id') === 0 && ($.isNumeric(value) || value.indexOf('ecommerce') === 0)) {
             extraParams[index] = value;
         }
     });
+
+    if (this.dataTable && this.dataTable.jsViewDataTable === 'tableGoals') {
+        // When there is a idGoal parameter available, the user is currently viewing a Goal or Ecommerce page
+        // In this case we want to show the specific goal metrics in the row evolution
+        if (extraParams['idGoal']) {
+            extraParams['showGoalMetricsForGoal'] = extraParams['idGoal'];
+            delete(extraParams['idGoal']);
+        }
+        // If no idGoal is available it is a random report switched to goal visualization
+        // we then ensure the row evolution will show the goal overview metrics
+        else  {
+            extraParams['showGoalMetricsForGoal'] = -1;
+        }
+    }
 
     // check if abandonedCarts is in the dataTable params and if so, propagate to row evolution request
     if (this.dataTable.param.abandonedCarts !== undefined) {
         extraParams['abandonedCarts'] = this.dataTable.param.abandonedCarts;
     }
 
+    if (this.dataTable.param.secondaryDimension !== undefined) {
+        extraParams['secondaryDimension'] = this.dataTable.param.secondaryDimension;
+    }
+
+    if (this.dataTable.param.flat !== undefined) {
+        extraParams['flat'] = this.dataTable.param.flat;
+    }
+
     var apiMethod = this.dataTable.param.module + '.' + this.dataTable.param.action;
     this.openPopover(apiMethod, extraParams, label);
 };
 
-DataTable_RowActions_RowEvolution.prototype.addMultiEvolutionRow = function (label) {
-    if ($.inArray(label, this.multiEvolutionRows) == -1) {
+DataTable_RowActions_RowEvolution.prototype.getPrettyLabel = function getPrettyLabel(tr) {
+  if (!this.dataTable.props.row_identifier || this.dataTable.props.row_identifier === 'label') {
+    return null; // only necessary if a custom row identifier is provided for the report
+  }
+
+  var prettyLabel = [];
+
+  var row = $(tr);
+  while (row.length) {
+    var label = row.data('label-pretty') || this.getLabelFromTr(row);
+    prettyLabel.unshift(label);
+
+    var subtable = row.closest('table');
+    if (subtable.is('.subDataTable')) {
+      row = subtable.closest('tr').prev();
+    } else {
+      break;
+    }
+  }
+
+  return prettyLabel.join(' > ');
+};
+
+DataTable_RowActions_RowEvolution.prototype.addMultiEvolutionRow = function (label, seriesIndex, tr) {
+    if (typeof seriesIndex !== 'undefined') {
+        var self = this;
+
+        var found = false;
+        this.multiEvolutionRows.forEach(function (rowLabel, index) {
+            var rowSeriesIndex = self.multiEvolutionRowsSeries[index];
+            if (label === rowLabel && seriesIndex === rowSeriesIndex) {
+                found = true;
+                return false;
+            }
+        });
+
+        if (!found) {
+            this.multiEvolutionRows.push(label);
+            this.multiEvolutionRowsPretty.push(this.getPrettyLabel(tr));
+            this.multiEvolutionRowsSeries.push(seriesIndex);
+        }
+    } else if ($.inArray(label, this.multiEvolutionRows) === -1) {
         this.multiEvolutionRows.push(label);
+        this.multiEvolutionRowsPretty.push(this.getPrettyLabel(tr))
+
+        this.multiEvolutionRowsSeries = []; // for safety, make sure state is consistent
     }
 };
 
@@ -367,6 +478,8 @@ DataTable_RowActions_RowEvolution.prototype.showRowEvolution = function (apiMeth
         Piwik_Popover.onClose(function () {
             // reset rows marked for multi row evolution on close
             self.multiEvolutionRows = [];
+            self.multiEvolutionRowsPretty = [];
+            self.multiEvolutionRowsSeries = [];
         });
 
         if (self.dataTable !== null) {
@@ -387,7 +500,7 @@ DataTable_RowActions_RowEvolution.prototype.showRowEvolution = function (apiMeth
         box.find('select.multirowevoltion-metric').change(function () {
             var metric = $(this).val();
             Piwik_Popover.onClose(false); // unbind listener that resets multiEvolutionRows
-            var extraParams = {action: 'getMultiRowEvolutionPopover', column: metric};
+            extraParams.column = metric;
             self.openPopover(apiMethod, extraParams, label);
             return true;
         });
@@ -413,17 +526,11 @@ DataTable_RowActions_RowEvolution.prototype.showRowEvolution = function (apiMeth
         }
     }
 
-    if (self.dataTable && self.dataTable.jsViewDataTable === 'tableGoals') {
-        // remove idGoal param, when it's set for goal visualizations
-        if (extraParams['idGoal']) {
-            delete(extraParams['idGoal']);
-        }
-    }
-
     $.extend(requestParams, extraParams);
 
     var ajaxRequest = new ajaxHelper();
     ajaxRequest.addParams(requestParams, 'get');
+    ajaxRequest.withTokenInUrl();
     ajaxRequest.setCallback(callback);
     ajaxRequest.setFormat('html');
     ajaxRequest.send();

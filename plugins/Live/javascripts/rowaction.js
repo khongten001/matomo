@@ -1,7 +1,7 @@
 /*!
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -67,17 +67,32 @@
     DataTable_RowActions_SegmentVisitorLog.prototype.trigger = function (tr, e, subTableLabel) {
         var segment = getRawSegmentValueFromRow(tr);
 
+        if (this.dataTable.param.segment) {
+            segment = decodeURIComponent(this.dataTable.param.segment) + ';' + segment;
+        }
+
+        if (this.dataTable.props.segmented_visitor_log_segment_suffix) {
+            segment = segment + ';' + this.dataTable.props.segmented_visitor_log_segment_suffix;
+        }
+
         this.performAction(segment, tr, e);
     };
 
-    DataTable_RowActions_SegmentVisitorLog.prototype.performAction = function (segment, tr, e) {
+    DataTable_RowActions_SegmentVisitorLog.prototype.performAction = function (segment, tr, e, originalRow) {
 
         var apiMethod = this.dataTable.param.module + '.' + this.dataTable.param.action;
 
         var extraParams = {};
+
         if (this.dataTable.param.date && this.dataTable.param.period) {
             extraParams = {date: this.dataTable.param.date, period: this.dataTable.param.period};
         }
+
+        var paramOverride = $(originalRow || tr).data('param-override');
+        if (typeof paramOverride !== 'object') {
+            paramOverride = {};
+        }
+        $.extend(extraParams, paramOverride);
 
         $.each(this.dataTable.param, function (index, value) {
             // we automatically add fields like idDimension, idGoal etc.
@@ -111,7 +126,7 @@
 
         name: actionName,
 
-        dataTableIcon: 'icon-visitor-profile',
+        dataTableIcon: 'icon-segmented-visits-log',
 
         order: 30,
 
@@ -121,11 +136,11 @@
         ],
 
         isAvailableOnReport: function (dataTableParams, undefined) {
-            return true;
+            return !!piwik.visitorLogEnabled;
         },
 
         isAvailableOnRow: function (dataTableParams, tr) {
-            var value = getRawSegmentValueFromRow(tr)
+            var value = getRawSegmentValueFromRow(tr);
             if ('undefined' === (typeof value)) {
                 return false;
             }

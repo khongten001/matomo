@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,11 +10,14 @@ namespace Piwik\Tracker;
 
 use Piwik\Cache as PiwikCache;
 use Piwik\Common;
-use Piwik\DeviceDetectorFactory;
-use Piwik\Network\IP;
+use Piwik\Container\StaticContainer;
+use Piwik\DeviceDetector\DeviceDetectorFactory;
+use Piwik\Exception\UnexpectedWebsiteFoundException;
+use Matomo\Network\IP;
 use Piwik\Piwik;
 use Piwik\Plugins\SitesManager\SiteUrls;
 use Piwik\Tracker\Visit\ReferrerSpamFilter;
+use Piwik\Config;
 
 /**
  * This class contains the logic to exclude some visitors from being tracked as per user settings
@@ -26,15 +29,28 @@ class VisitExcluded
      */
     private $spamFilter;
 
+    private $siteCache = array();
+
+    public $request;
+    public $idSite;
+    public $userAgent;
+    public $ip;
+
     /**
      * @param Request $request
      */
     public function __construct(Request $request)
     {
         $this->spamFilter = new ReferrerSpamFilter();
-
         $this->request   = $request;
-        $this->idSite    = $request->getIdSite();
+
+        try {
+            $this->idSite = $request->getIdSite();
+        } catch (UnexpectedWebsiteFoundException $e){
+            // most checks will still work on a global scope and we still want to be able to test if this is a valid
+            // visit or not
+            $this->idSite = 0;
+        }
         $userAgent       = $request->getUserAgent();
         $this->userAgent = Common::unsanitizeInputValue($userAgent);
         $this->ip        = $request->getIp();
@@ -90,6 +106,14 @@ class VisitExcluded
          * These are of higher priority and should not be overwritten by plugins.
          */
 
+        // Checking if in config some requests are excluded
+        if (!$excluded) {
+            $excluded = $this->request->isRequestExcluded();
+            if ($excluded) {
+                Common::printDebug("Request is excluded.");
+            }
+        }
+
         // Checking if the Piwik ignore cookie is set
         if (!$excluded) {
             $excluded = $this->isIgnoreCookieFound();
@@ -115,11 +139,16 @@ class VisitExcluded
         }
 
         // Check if Referrer URL is a known spam
-        if (!$excluded) {
-            $excluded = $this->isReferrerSpamExcluded();
-            if ($excluded) {
-                Common::printDebug("Referrer URL is blacklisted as spam.");
+        $generalConfig = Config::getInstance()->Tracker;
+        if ($generalConfig['enable_spam_filter']) {
+            if (!$excluded) {
+                $excluded = $this->isReferrerSpamExcluded();
+                if ($excluded) {
+                    Common::printDebug("Referrer URL is listed as spam.");
+                }
             }
+        } else {
+            Common::printDebug("Spam list is disabled.");
         }
 
         // Check if request URL is excluded
@@ -166,7 +195,7 @@ class VisitExcluded
     {
         $allowBots = $this->request->getParam('bots');
 
-        $deviceDetector = DeviceDetectorFactory::getInstance($this->userAgent);
+        $deviceDetector = StaticContainer::get(DeviceDetectorFactory::class)->makeInstance($this->userAgent, $this->request->getClientHints());
 
         return !$allowBots
             && ($deviceDetector->isBot() || $this->isIpInRange());
@@ -194,7 +223,7 @@ class VisitExcluded
         return $isInRanges;
     }
 
-    private function isChromeDataSaverUsed(IP $ip)
+    public function isChromeDataSaverUsed(IP $ip)
     {
         // see https://github.com/piwik/piwik/issues/7733
         return !empty($_SERVER['HTTP_VIA'])
@@ -263,11 +292,11 @@ class VisitExcluded
      */
     protected function isVisitorIpExcluded()
     {
-        $websiteAttributes = Cache::getCacheWebsiteAttributes($this->idSite);
+        $excludedIps = $this->getAttributes('excluded_ips', 'global_excluded_ips');
 
-        if (!empty($websiteAttributes['excluded_ips'])) {
+        if (!empty($excludedIps)) {
             $ip = IP::fromBinaryIP($this->ip);
-            if ($ip->isInRanges($websiteAttributes['excluded_ips'])) {
+            if ($ip->isInRanges($excludedIps)) {
                 Common::printDebug('Visitor IP ' . $ip->toString() . ' is excluded from being tracked');
                 return true;
             }
@@ -276,20 +305,41 @@ class VisitExcluded
         return false;
     }
 
+    private function getAttributes($siteAttribute, $globalAttribute)
+    {
+        if (!isset($this->siteCache[$this->idSite])) {
+            $this->siteCache[$this->idSite] = array();
+        }
+        try {
+            if (empty($this->siteCache[$this->idSite])) {
+                $this->siteCache[$this->idSite] = Cache::getCacheWebsiteAttributes($this->idSite);
+            }
+            if (isset($this->siteCache[$this->idSite][$siteAttribute])) {
+                return $this->siteCache[$this->idSite][$siteAttribute];
+            }
+        } catch (UnexpectedWebsiteFoundException $e) {
+            $cached = Cache::getCacheGeneral();
+            if ($globalAttribute && isset($cached[$globalAttribute])) {
+                return $cached[$globalAttribute];
+            }
+        }
+    }
+
     /**
      * Checks if request URL is excluded
      * @return bool
      */
     protected function isUrlExcluded()
     {
-        $site = Cache::getCacheWebsiteAttributes($this->idSite);
+        $excludedUrls = $this->getAttributes('exclude_unknown_urls', null);
+        $siteUrls = $this->getAttributes('urls', null);
 
-        if (!empty($site['exclude_unknown_urls']) && !empty($site['urls'])) {
+        if (!empty($excludedUrls) && !empty($siteUrls)) {
             $url = $this->request->getParam('url');
             $parsedUrl = parse_url($url);
 
             $trackingUrl = new SiteUrls();
-            $urls = $trackingUrl->groupUrlsByHost(array($this->idSite => $site['urls']));
+            $urls = $trackingUrl->groupUrlsByHost(array($this->idSite => $siteUrls));
 
             $idSites = $trackingUrl->getIdSitesMatchingUrl($parsedUrl, $urls);
             $isUrlExcluded = !isset($idSites) || !in_array($this->idSite, $idSites);
@@ -304,20 +354,25 @@ class VisitExcluded
      * Returns true if the specified user agent should be excluded for the current site or not.
      *
      * Visits whose user agent string contains one of the excluded_user_agents strings for the
-     * site being tracked (or one of the global strings) will be excluded.
+     * site being tracked (or one of the global strings) will be excluded. Regular expressions
+     * are also supported.
      *
      * @internal param string $this ->userAgent The user agent string.
      * @return bool
      */
-    protected function isUserAgentExcluded()
+    protected function isUserAgentExcluded(): bool
     {
-        $websiteAttributes = Cache::getCacheWebsiteAttributes($this->idSite);
+        $excludedAgents = $this->getAttributes('excluded_user_agents', 'global_excluded_user_agents');
 
-        if (!empty($websiteAttributes['excluded_user_agents'])) {
-            foreach ($websiteAttributes['excluded_user_agents'] as $excludedUserAgent) {
+        if (!empty($excludedAgents)) {
+            foreach ($excludedAgents as $excludedUserAgent) {
                 // if the excluded user agent string part is in this visit's user agent, this visit should be excluded
                 if (stripos($this->userAgent, $excludedUserAgent) !== false) {
                     return true;
+                }
+                // if the string is a valid regex, and the user agent matches, this visit should be excluded
+                if (@preg_match($excludedUserAgent, null) !== false) {
+                    return preg_match($excludedUserAgent, $this->userAgent) ? true : false;
                 }
             }
         }

@@ -1,26 +1,25 @@
 <?php
 
-use Interop\Container\ContainerInterface;
-use Piwik\Plugins\Marketplace\tests\Framework\Mock\Consumer as MockConsumer;
-use Piwik\Plugins\Marketplace\LicenseKey;
-use Piwik\Plugins\Marketplace\tests\Framework\Mock\Service as MockService;
 use Piwik\Plugins\Marketplace\Input\PurchaseType;
+use Piwik\Plugins\Marketplace\LicenseKey;
+use Piwik\Plugins\Marketplace\tests\Framework\Mock\Consumer as MockConsumer;
+use Piwik\Plugins\Marketplace\tests\Framework\Mock\Service as MockService;
+use Piwik\Container\Container;
 
 return array(
-    'MarketplaceEndpoint' => function (ContainerInterface $c) {
+    'MarketplaceEndpoint' => function (Container $c) {
         // if you wonder why this here is configured here again, and the same as in `config.php`,
         // it is because someone might have overwritten MarketplaceEndpoit in local config.php and we want
         // to make sure system tests of marketplace are ran against plugins.piwik.org
         $domain = 'http://plugins.piwik.org';
-        $updater = $c->get('Piwik\Plugins\CoreUpdater\Updater');
 
-        if ($updater->isUpdatingOverHttps()) {
+        if (\Piwik\Http::isUpdatingOverHttps()) {
             $domain = str_replace('http://', 'https://', $domain);
         }
 
         return $domain;
     },
-    'Piwik\Plugins\Marketplace\Consumer' => function (ContainerInterface $c) {
+    'Piwik\Plugins\Marketplace\Consumer' => function (Container $c) {
         $consumerTest = $c->get('test.vars.consumer');
         $licenseKey = new LicenseKey();
 
@@ -40,7 +39,7 @@ return array(
 
         return $consumer;
     },
-    'Piwik\Plugins\Marketplace\Plugins' => DI\decorate(function ($previous, ContainerInterface $c) {
+    'Piwik\Plugins\Marketplace\Plugins' => Piwik\DI::decorate(function ($previous, Container $c) {
         /** @var \Piwik\Plugins\Marketplace\Plugins $previous */
         $previous->setPluginsHavingUpdateCache(null);
 
@@ -53,13 +52,13 @@ return array(
 
         return $previous;
     }),
-    'Piwik\Plugins\Marketplace\Api\Client' => DI\decorate(function ($previous) {
+    'Piwik\Plugins\Marketplace\Api\Client' => Piwik\DI::decorate(function ($previous) {
         /** @var \Piwik\Plugins\Marketplace\Api\Client $previous */
         $previous->clearAllCacheEntries();
 
         return $previous;
     }),
-    'Piwik\Plugins\Marketplace\Plugins\InvalidLicenses' => DI\decorate(function ($previous, ContainerInterface $c) {
+    'Piwik\Plugins\Marketplace\Plugins\InvalidLicenses' => Piwik\DI::decorate(function ($previous, Container $c) {
 
         $pluginNames = $c->get('test.vars.mockMarketplaceAssumePluginNamesActivated');
 
@@ -70,9 +69,8 @@ return array(
         }
 
         return $previous;
-
     }),
-    'Piwik\Plugins\Marketplace\Api\Service' => DI\decorate(function ($previous, ContainerInterface $c) {
+    'Piwik\Plugins\Marketplace\Api\Service' => Piwik\DI::decorate(function ($previous, Container $c) {
         if (!$c->get('test.vars.mockMarketplaceApiService')) {
             return $previous;
         }

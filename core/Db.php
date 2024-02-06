@@ -1,15 +1,14 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik;
 
 use Exception;
-use Piwik\DataAccess\TableMetadata;
 use Piwik\Db\Adapter;
 
 /**
@@ -36,9 +35,12 @@ class Db
     const SQL_MODE = 'NO_AUTO_VALUE_ON_ZERO';
 
     private static $connection = null;
+    private static $readerConnection = null;
 
     private static $logQueries = true;
 
+    // this is used for indicate TransactionLevel Cache
+    public $supportsUncommitted;
     /**
      * Returns the database connection and creates it if it hasn't been already.
      *
@@ -55,6 +57,39 @@ class Db
         }
 
         return self::$connection;
+    }
+
+    /**
+     * @internal
+     * @ignore
+     * @return bool
+     */
+    public static function hasReaderConfigured()
+    {
+        $readerConfig = Config::getInstance()->database_reader;
+
+        return !empty($readerConfig['host']);
+    }
+
+    /**
+     * Returns the database connection and creates it if it hasn't been already. Make sure to not write any data on
+     * the reader and only use the connection to read data.
+     *
+     * @since Matomo 3.12
+     *
+     * @return \Piwik\Tracker\Db|\Piwik\Db\AdapterInterface|\Piwik\Db
+     */
+    public static function getReader()
+    {
+        if (!self::hasReaderConfigured()) {
+            return self::get();
+        }
+
+        if (!self::hasReaderDatabaseObject()) {
+            self::createReaderDatabaseObject();
+        }
+
+        return self::$readerConnection;
     }
 
     /**
@@ -125,6 +160,39 @@ class Db
     }
 
     /**
+     * Connects to the reader database.
+     *
+     * Shouldn't be called directly, use {@link get()} instead.
+     *
+     * @param array|null $dbConfig Connection parameters in an array. Defaults to the `[database]`
+     *                             INI config section.
+     *
+     * @since Matomo 3.12
+     */
+    public static function createReaderDatabaseObject($dbConfig = null)
+    {
+        if (!isset($dbConfig)) {
+            $dbConfig = Config::getInstance()->database_reader;
+        }
+
+        $masterDbConfig = self::getDatabaseConfig();
+        $dbConfig = self::getDatabaseConfig($dbConfig);
+        $dbConfig['adapter'] = $masterDbConfig['adapter'];
+        $dbConfig['schema'] = $masterDbConfig['schema'];
+        $dbConfig['type'] = $masterDbConfig['type'];
+        $dbConfig['tables_prefix'] = $masterDbConfig['tables_prefix'];
+        $dbConfig['charset'] = $masterDbConfig['charset'];
+
+        $db = @Adapter::factory($dbConfig['adapter'], $dbConfig);
+
+        if (!empty($dbConfig['aurora_readonly_read_committed'])) {
+            $db->exec('set session aurora_read_replica_read_committed = ON;set session transaction isolation level read committed;');
+        }
+
+        self::$readerConnection = $db;
+    }
+
+    /**
      * Detect whether a database object is initialized / created or not.
      *
      * @internal
@@ -132,6 +200,16 @@ class Db
     public static function hasDatabaseObject()
     {
         return isset(self::$connection);
+    }
+
+    /**
+     * Detect whether a database object is initialized / created or not.
+     *
+     * @internal
+     */
+    public static function hasReaderDatabaseObject()
+    {
+        return isset(self::$readerConnection);
     }
 
     /**
@@ -145,6 +223,11 @@ class Db
             DbHelper::disconnectDatabase();
         }
         self::$connection = null;
+
+        if (self::hasReaderDatabaseObject()) {
+            self::$readerConnection->closeConnection();
+        }
+        self::$readerConnection = null;
     }
 
     /**
@@ -338,7 +421,7 @@ class Db
      * @param string|array $tables The name of the table to optimize or an array of tables to optimize.
      *                             Table names must be prefixed (see {@link Piwik\Common::prefixTable()}).
      * @param bool $force If true, the `OPTIMIZE TABLE` query will be run even if InnoDB tables are being used.
-     * @return \Zend_Db_Statement
+     * @return bool
      */
     public static function optimizeTables($tables, $force = false)
     {
@@ -379,7 +462,15 @@ class Db
         }
 
         // optimize the tables
-        return self::query("OPTIMIZE TABLE " . implode(',', $tables));
+        $success = true;
+        foreach ($tables as &$t) {
+            $ok = self::query('OPTIMIZE TABLE ' . $t);
+            if (!$ok) {
+                $success = false;
+            }
+        }
+
+        return $success;
     }
 
     private static function getTableStatus()
@@ -410,19 +501,6 @@ class Db
     {
         $tablesAlreadyInstalled = DbHelper::getTablesInstalled();
         self::dropTables($tablesAlreadyInstalled);
-    }
-
-    /**
-     * Get columns information from table
-     *
-     * @param string|array $table The name of the table you want to get the columns definition for.
-     * @return \Zend_Db_Statement
-     * @deprecated since 2.11.0
-     */
-    public static function getColumnNamesFromTable($table)
-    {
-        $tableMetadataAccess = new TableMetadata();
-        return $tableMetadataAccess->getColumns($table);
     }
 
     /**
@@ -708,7 +786,7 @@ class Db
     {
         if (is_null(self::$lockPrivilegeGranted)) {
             try {
-                Db::lockTables(Common::prefixTable('log_visit'));
+                Db::lockTables(Common::prefixTable('site_url'));
                 Db::unlockAllTables();
 
                 self::$lockPrivilegeGranted = true;
@@ -722,7 +800,9 @@ class Db
 
     private static function logExtraInfoIfDeadlock($ex)
     {
-        if (!self::get()->isErrNo($ex, 1213)) {
+        if (!self::get()->isErrNo($ex, 1213)
+            && !self::get()->isErrNo($ex, 1205)
+        ) {
             return;
         }
 
@@ -731,7 +811,6 @@ class Db
 
             // log using exception so backtrace appears in log output
             Log::debug(new Exception("Encountered deadlock: " . print_r($deadlockInfo, true)));
-
         } catch(\Exception $e) {
             //  1227 Access denied; you need (at least one of) the PROCESS privilege(s) for this operation
         }
@@ -739,6 +818,8 @@ class Db
 
     private static function logSql($functionName, $sql, $parameters = array())
     {
+        self::checkBoundParametersIfInDevMode($sql, $parameters);
+
         if (self::$logQueries === false
             || @Config::getInstance()->Debug['log_sql_queries'] != 1
         ) {
@@ -747,6 +828,23 @@ class Db
 
         // NOTE: at the moment we don't log parameters in order to avoid sensitive information leaks
         Log::debug("Db::%s() executing SQL: %s", $functionName, $sql);
+    }
+
+    private static function checkBoundParametersIfInDevMode($sql, $parameters)
+    {
+        if (!Development::isEnabled()) {
+            return;
+        }
+
+        if (!is_array($parameters)) {
+            $parameters = [$parameters];
+        }
+
+        foreach ($parameters as $index => $parameter) {
+            if ($parameter instanceof Date) {
+                throw new \Exception("Found bound parameter (index = $index) is Date instance which will not work correctly in following SQL: $sql");
+            }
+        }
     }
 
     /**

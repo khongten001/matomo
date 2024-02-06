@@ -1,72 +1,69 @@
 <?php
+
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Plugins\SEO\tests\Integration;
 
 use Piwik\DataTable\Renderer;
+use Piwik\Piwik;
 use Piwik\Plugins\SEO\API;
-use Exception;
+use Piwik\Tests\Framework\Fixture;
 use Piwik\Tests\Framework\Mock\FakeAccess;
+use Piwik\Tests\Framework\TestCase\IntegrationTestCase;
 
 /**
  * @group SEO
  * @group SEOTest
  * @group Plugins
  */
-class SEOTest extends \PHPUnit_Framework_TestCase
+class SEOTest extends IntegrationTestCase
 {
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
-        // setup the access layer
-        FakeAccess::setIdSitesView(array(1, 2));
-        FakeAccess::setIdSitesAdmin(array(3, 4));
+        // Setup the access layer
+        FakeAccess::setIdSitesView([1, 2]);
+        FakeAccess::setIdSitesAdmin([3, 4]);
 
-        //finally we set the user as a Super User by default
+        // Finally we set the user as a Super User by default
         FakeAccess::$superUser = true;
 
-        $user_agents = array(
-            'Mozilla/6.0 (Macintosh; I; Intel Mac OS X 11_7_9; de-LI; rv:1.9b4) Gecko/2012010317 Firefox/10.0a4',
-            'Mozilla/5.0 (compatible; MSIE 10.6; Windows NT 6.1; Trident/5.0; InfoPath.2; SLCC1; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30729; .NET CLR 2.0.50727) 3gpp-gba UNTRUSTED/1.0',
-            'Mozilla/5.0 (Windows NT 6.1) AppleWebKit/535.2 (KHTML, like Gecko) Chrome/18.6.872.0 Safari/535.2 UNTRUSTED/1.0 3gpp-gba UNTRUSTED/1.0',
-            'Mozilla/5.0 (Macintosh; U; Intel Mac OS X 10_6_8; de-at) AppleWebKit/533.21.1 (KHTML, like Gecko) Version/5.0.5 Safari/533.21.1',
-        );
+        // Needed to load the Intl_NumberFormatNumber translation string used when formatting the ranking numbers
+        Fixture::loadAllTranslations();
 
-        $_SERVER['HTTP_USER_AGENT'] = $user_agents[mt_rand(0, count($user_agents) - 1)];
+        // Google and Bing may not show the indexed pages count for some user agents, some UA strings will work for
+        // Google, but not Bing and visa-versa. This user agent string works for both as of 2023-06-26:
+        $_SERVER['HTTP_USER_AGENT'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36';
     }
 
     /**
      * tell us when the API is broken
      */
-    public function test_API()
+    public function testAPI()
     {
-        try {
-            $dataTable = API::getInstance()->getRank('http://www.microsoft.com/');
-        } catch(Exception $e) {
-            $this->markTestSkipped('A SEO http request failed, Skipping this test for now. Error was: '.$e->getMessage());
-        }
-        $renderer = Renderer::factory('php');
-        $renderer->setSerialize(false);
-        $ranks = $renderer->render($dataTable);
+        $dataTable = API::getInstance()->getRank('http://matomo.org/');
+        $renderer = Renderer::factory('json');
+        $renderer->setTable($dataTable);
+        $ranks = json_decode($renderer->render(), true);
         foreach ($ranks as $rank) {
-            $message = $rank['id'] . ' expected non-zero rank, got [' . $rank['rank'] . ']';
-            if(empty($rank['rank'])) {
-                $this->markTestSkipped("Skipped to avoid random build failure: " . $message);
+            if ($rank['rank'] == Piwik::translate('General_ErrorTryAgain')) {
+                $this->markTestSkipped('An exception raised when fetching data. Skipping this test for now.');
+                continue;
             }
-            $this->assertNotEmpty($rank['rank'], $message);
+            $this->assertNotEmpty($rank['rank'], $rank['id'] . ' expected non-zero rank, got [' . $rank['rank'] . ']');
         }
     }
 
     public function provideContainerConfig()
     {
-        return array(
-            'Piwik\Access' => new FakeAccess()
-        );
+        return [
+          'Piwik\Access' => new FakeAccess()
+        ];
     }
 }

@@ -1,26 +1,28 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Tests\Core\DataTable\Filter;
 
 use Piwik\API\Proxy;
+use Piwik\Plugin\Manager;
 use Piwik\Plugins\CustomVariables\CustomVariables;
+use Piwik\Tests\Framework\Fixture;
+use Piwik\Tests\Framework\TestCase\IntegrationTestCase;
 use Piwik\Tracker\Cache;
 use Piwik\DataTable;
 use Piwik\DataTable\Filter\PivotByDimension;
 use Piwik\DataTable\Row;
 use Piwik\Plugin\Manager as PluginManager;
 use Exception;
-use Piwik\Translate;
 
 /**
  * @group DataTableTest
  */
-class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
+class PivotByDimensionTest extends IntegrationTestCase
 {
     /**
      * The number of segment tables that have been created. Used when injecting API results to make sure each
@@ -38,101 +40,72 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
      */
     public $segmentUsedToGetIntersected = array();
 
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
-        Translate::reset();
+        Fixture::resetTranslations();
         Cache::clearCacheGeneral();
         \Piwik\Cache::flushAll();
-
-        $self = $this;
-
-        $proxyMock = $this->getMockBuilder('stdClass')->setMethods(array('call'))->getMock();
-        $proxyMock->expects($this->any())->method('call')->willReturnCallback(function ($className, $methodName, $parameters) use ($self) {
-            if ($className == "\\Piwik\\Plugins\\UserCountry\\API"
-                && $methodName == 'getCity'
-            ) {
-                $self->segmentUsedToGetIntersected[] = $parameters['segment'];
-
-                return $self->getSegmentTable();
-            } else {
-                throw new Exception("Unknown API request: $className::$methodName.");
-            }
-        });
-        Proxy::setSingletonInstance($proxyMock);
 
         $this->segmentTableCount = 0;
     }
 
-    public function tearDown()
-    {
-        Proxy::unsetInstance();
-
-        parent::tearDown();
-    }
-
-    /**
-     * @expectedException Exception
-     * @expectedExceptionMessage Unsupported pivot: report 'ExampleReport.ExampleReportName' has no subtable dimension.
-     */
     public function test_construction_ShouldFail_WhenReportHasNoSubtableAndSegmentFetchingIsDisabled()
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Unsupported pivot: report \'ExampleReport.getExampleReport\' has no subtable dimension.');
+
         $this->loadPlugins('ExampleReport', 'UserCountry');
 
         new PivotByDimension(new DataTable(), "ExampleReport.GetExampleReport", "UserCountry.City", 'nb_visits', $columnLimit = -1, $enableFetchBySegment = false);
     }
 
-    /**
-     * @expectedException Exception
-     * @expectedExceptionMessage Unsupported pivot: the subtable dimension for 'Referrers.Referrers_Keywords' does not match the requested pivotBy dimension.
-     */
     public function test_construction_ShouldFail_WhenDimensionIsNotSubtableAndSegmentFetchingIsDisabled()
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Unsupported pivot: the subtable dimension for \'Referrers.getKeywords\' does not match the requested pivotBy dimension.');
+
         $this->loadPlugins('Referrers', 'UserCountry');
 
         new PivotByDimension(new DataTable(), "Referrers.getKeywords", "UserCountry.City", "nb_visits", $columnLimit = -1, $enableFetchBySegment = false);
     }
 
-    /**
-     * @expectedException Exception
-     * @expectedExceptionMessage Unsupported pivot: No segment for dimension of report 'Resolution.Resolution_Configurations'
-     */
     public function test_construction_ShouldFail_WhenDimensionIsNotSubtableAndSegmentFetchingIsEnabledButThereIsNoSegment()
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Unsupported pivot: No segment for dimension of report \'Resolution.getConfiguration\'');
+
         $this->loadPlugins('Referrers', 'Resolution');
 
         new PivotByDimension(new DataTable(), "Resolution.GetConfiguration", "Referrers.Keyword", "nb_visits");
     }
 
-    /**
-     * @expectedException Exception
-     * @expectedExceptionMessage Invalid dimension 'ExampleTracker.InvalidDimension'
-     */
     public function test_construction_ShouldFail_WhenDimensionDoesNotExist()
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Invalid dimension \'ExampleTracker.InvalidDimension\'');
+
         $this->loadPlugins('ExampleReport', 'ExampleTracker');
 
         new PivotByDimension(new DataTable(), "ExampleReport.GetExampleReport", "ExampleTracker.InvalidDimension", 'nb_visits');
     }
 
-    /**
-     * @expectedException Exception
-     * @expectedExceptionMessage Unsupported pivot: No report for pivot dimension 'ExampleTracker.ExampleDimension'
-     */
     public function test_construction_ShouldFail_WhenThereIsNoReportForADimension()
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Unsupported pivot: No report for pivot dimension \'ExampleTracker.ExampleDimension\'');
+
         $this->loadPlugins('ExampleReport', 'ExampleTracker');
 
         new PivotByDimension(new DataTable(), "ExampleReport.GetExampleReport", "ExampleTracker.ExampleDimension", "nb_visits");
     }
 
-    /**
-     * @expectedException Exception
-     * @expectedExceptionMessage Unable to find report 'ExampleReport.InvalidReport'
-     */
     public function test_construction_ShouldFail_WhenSpecifiedReportIsNotValid()
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Unable to find report \'ExampleReport.InvalidReport\'');
+
         $this->loadPlugins('ExampleReport', 'Referrers');
 
         new PivotByDimension(new DataTable(), "ExampleReport.InvalidReport", "Referrers.Keyword", "nb_visits");
@@ -140,7 +113,7 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
 
     public function test_filter_ReturnsEmptyResult_WhenTableToFilterIsEmpty()
     {
-        $this->loadPlugins('Referrers', 'UserCountry', 'CustomVariables');
+        $this->loadPlugins('Referrers', 'UserCountry');
 
         $table = new DataTable();
 
@@ -152,7 +125,7 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
 
     public function test_filter_CorrectlyCreatesPivotTable_WhenUsingSubtableReport()
     {
-        $this->loadPlugins('Referrers', 'UserCountry', 'CustomVariables');
+        $this->loadPlugins('Referrers', 'UserCountry');
 
         $table = $this->getTableToFilter(true);
 
@@ -169,7 +142,7 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
 
     public function test_filter_CorrectlyCreatesPivotTable_WhenUsingSegment()
     {
-        $this->loadPlugins('Referrers', 'UserCountry', 'CustomVariables');
+        $this->loadPlugins('Referrers', 'UserCountry');
 
         $table = $this->getTableToFilter(true);
 
@@ -192,7 +165,7 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
      */
     public function test_filter_UsesCorrectSegment_WhenPivotingSegmentedReport()
     {
-        $this->loadPlugins('Referrers', 'UserCountry', 'CustomVariables');
+        $this->loadPlugins('Referrers', 'UserCountry');
 
         $table = $this->getTableToFilter(true);
 
@@ -211,7 +184,7 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
 
     public function test_filter_CorrectlyCreatesPivotTable_WhenPivotMetricDoesNotExistInTable()
     {
-        $this->loadPlugins('Referrers', 'UserCountry', 'CustomVariables');
+        $this->loadPlugins('Referrers', 'UserCountry');
 
         $table = $this->getTableToFilter(true);
 
@@ -228,6 +201,10 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
 
     public function test_filter_CorrectlyCreatesPivotTable_WhenSubtablesHaveNoRows()
     {
+        if (!Manager::getInstance()->isPluginInstalled('CustomVariables')) {
+            $this->markTestSkipped('Test requires CustomVariables plugin to run');
+        }
+
         Cache::setCacheGeneral(array(CustomVariables::MAX_NUM_CUSTOMVARS_CACHEKEY => 5));
 
         $this->loadPlugins('Referrers', 'UserCountry', 'CustomVariables');
@@ -250,7 +227,7 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
 
     public function test_filter_CorrectlyDefaultsPivotByColumn_WhenNoneProvided()
     {
-        $this->loadPlugins('Referrers', 'UserCountry', 'CustomVariables');
+        $this->loadPlugins('Referrers', 'UserCountry');
 
         $table = $this->getTableToFilter(true);
 
@@ -267,7 +244,7 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
 
     public function test_filter_CorrectlyLimitsTheColumnNumber_WhenColumnLimitProvided()
     {
-        $this->loadPlugins('Referrers', 'UserCountry', 'CustomVariables');
+        $this->loadPlugins('Referrers', 'UserCountry');
 
         $table = $this->getTableToFilter(true);
 
@@ -388,9 +365,9 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
 
     private function assertTableRowsEquals($expectedRows, $table)
     {
-        $renderer = new DataTable\Renderer\Php();
-        $renderer->setSerialize(false);
-        $actualRows = $renderer->render($table);
+        $renderer = new DataTable\Renderer\Json();
+        $renderer->setTable($table);
+        $actualRows = json_decode($renderer->render(), true);
 
         $this->assertEquals($expectedRows, $actualRows);
     }
@@ -398,5 +375,24 @@ class PivotByDimensionTest extends \PHPUnit_Framework_TestCase
     private function loadPlugins()
     {
         PluginManager::getInstance()->loadPlugins(func_get_args());
+    }
+
+    public function provideContainerConfig()
+    {
+        $proxyMock = $this->getMockBuilder('stdClass')->addMethods(array('call'))->getMock();
+        $proxyMock->expects($this->any())->method('call')->willReturnCallback(function ($className, $methodName, $parameters) {
+            if ($className == "\\Piwik\\Plugins\\UserCountry\\API"
+                && $methodName == 'getCity'
+            ) {
+                $this->segmentUsedToGetIntersected[] = $parameters['segment'];
+                return $this->getSegmentTable();
+            } else {
+                throw new Exception("Unknown API request: $className::$methodName.");
+            }
+        });
+
+        return [
+            Proxy::class => $proxyMock,
+        ];
     }
 }

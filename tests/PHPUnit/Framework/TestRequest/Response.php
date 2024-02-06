@@ -1,18 +1,17 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Framework\TestRequest;
 
 use Piwik\API\Request;
-use PHPUnit_Framework_Assert as Asserts;
+use PHPUnit\Framework\Assert as Asserts;
 use Exception;
 use Piwik\Tests\Framework\Fixture;
-use Piwik\Tests\Framework\TestCase\SystemTestCase;
 
 /**
  * Utility class used to obtain and process API responses for API tests.
@@ -26,13 +25,13 @@ class Response
 
     private $requestUrl;
 
-    public function __construct($apiResponse, $params, $requestUrl)
+    public function __construct($apiResponse, $params, $requestUrl, $normalize = true)
     {
         $this->params = $params;
         $this->requestUrl = $requestUrl;
 
         $apiResponse = (string) $apiResponse;
-        $this->processedResponseText = $this->normalizeApiResponse($apiResponse);
+        $this->processedResponseText = $normalize ? $this->normalizeApiResponse($apiResponse) : $apiResponse;
     }
 
     public function getResponseText()
@@ -56,21 +55,27 @@ class Response
         return new Response($contents, $params, $requestUrl);
     }
 
-    public static function loadFromApi($params, $requestUrl)
+    public static function loadFromApi($params, $requestUrl, $normalize = true)
     {
         $testRequest = new Request($requestUrl);
+
+        // set the request as root request
+        Request::setIsRootRequestApiRequest(Request::getMethodIfApiRequest(Request::getRequestArrayFromString($requestUrl, null)));
 
         // Cast as string is important. For example when calling
         // with format=original, objects or php arrays can be returned.
         $response = (string) $testRequest->process();
 
-        return new Response($response, $params, $requestUrl);
+        return new Response($response, $params, $requestUrl, $normalize);
     }
 
     public static function assertEquals(Response $expected, Response $actual, $message = false)
     {
         $expectedText = $expected->getResponseText();
         $actualText = $actual->getResponseText();
+
+        $expectedText = preg_replace('/[^\x09-\x0d\x1b\x20-\xff]/', '', $expectedText);
+        $actualText = preg_replace('/[^\x09-\x0d\x1b\x20-\xff]/', '', $actualText);
 
         if ($expected->requestUrl['format'] == 'xml') {
             Asserts::assertXmlStringEqualsXmlString($expectedText, $actualText, $message);
@@ -125,7 +130,7 @@ class Response
     private function removeTodaysDate($apiResponse)
     {
         $result = preg_replace('/' . date('Y-m-d') . ' [0-9]{2}:[0-9]{2}:[0-9]{2}/', 'today-date-removed-in-tests', $apiResponse);
-        $result = str_replace(date('Y-m-d'), 'today-date-removed-in-tests', $result);;
+        $result = str_replace(date('Y-m-d'), 'today-date-removed-in-tests', $result);
         return $result;
     }
 
@@ -211,7 +216,7 @@ class Response
         if (!is_array($fieldsToRemove)) {
             $fieldsToRemove = array();
         }
-        
+
         foreach ($fieldsToRemove as $xml) {
             $input = $this->removeXmlElement($input, $xml);
         }
@@ -224,12 +229,12 @@ class Response
         $testNotSmallAfter = strlen($input > 100) && $testNotSmallAfter;
 
         $oldInput = $input;
-        $input = preg_replace('/(<' . $xmlElement . '>.+?<\/' . $xmlElement . '>)/', '', $input);
+        $input = preg_replace('/(<' . $xmlElement . '>.+?<\/' . $xmlElement . '>)/s', '', $input);
         $input = str_replace('<' . $xmlElement . ' />', '', $input);
 
         // check we didn't delete the whole string
         if ($testNotSmallAfter && $input != $oldInput) {
-            $this->assertTrue(strlen($input) > 100);
+            Asserts::assertTrue(strlen($input) > 100, "Removing element $xmlElement from request " . http_build_query($this->requestUrl) . " resulted in a too small value:\n$input");
         }
         return $input;
     }

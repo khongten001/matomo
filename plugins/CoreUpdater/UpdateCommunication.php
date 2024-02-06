@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -15,14 +15,15 @@ use Piwik\Piwik;
 use Piwik\Plugins\UsersManager\API as UsersManagerApi;
 use Piwik\SettingsPiwik;
 use Piwik\UpdateCheck;
+use Piwik\Url;
 use Piwik\Version;
+use Piwik\View;
 
 /**
  * Class to check and notify users via email if there is a core update available.
  */
 class UpdateCommunication
 {
-
     /**
      * Checks whether update communication in general is enabled or not.
      *
@@ -35,7 +36,7 @@ class UpdateCommunication
         if($isEnabled === true && SettingsPiwik::isInternetEnabled() === true){
             return true;
         }
-        
+
         return false;
     }
 
@@ -66,37 +67,23 @@ class UpdateCommunication
         $host = SettingsPiwik::getPiwikUrl();
 
         $subject  = Piwik::translate('CoreUpdater_NotificationSubjectAvailableCoreUpdate', $latestVersion);
-        $message  = Piwik::translate('ScheduledReports_EmailHello');
-        $message .= "\n\n";
-        $message .= Piwik::translate('CoreUpdater_ThereIsNewVersionAvailableForUpdate');
-        $message .= "\n\n";
-        $message .= Piwik::translate('CoreUpdater_YouCanUpgradeAutomaticallyOrDownloadPackage', $latestVersion);
-        $message .= "\n";
-        $message .= $host . 'index.php?module=CoreUpdater&action=newVersionAvailable';
-        $message .= "\n\n";
+
+        $view = new View('@CoreUpdater/_updateCommunicationEmail.twig');
+        $view->latestVersion = $latestVersion;
+        $view->host = $host;
 
         $version = new Version();
-        if ($version->isStableVersion($latestVersion)) {
-            $message .= Piwik::translate('CoreUpdater_ViewVersionChangelog');
-            $message .= "\n";
-            $message .= $this->getLinkToChangeLog($latestVersion);
-            $message .= "\n\n";
-        }
+        $view->isStableVersion = $version->isStableVersion($latestVersion);
+        $view->linkToChangeLog = $this->getLinkToChangeLog($latestVersion);
 
-        $message .= Piwik::translate('CoreUpdater_ReceiveEmailBecauseIsSuperUser', $host); 
-        $message .= "\n\n";
-        $message .= Piwik::translate('CoreUpdater_FeedbackRequest');
-        $message .= "\n";
-        $message .= 'https://matomo.org/contact/';
-
-        $this->sendEmailNotification($subject, $message);
+        $this->sendEmailNotification($subject, $view);
     }
 
     private function getLinkToChangeLog($version)
     {
         $version = str_replace('.', '-', $version);
 
-        $link = sprintf('https://matomo.org/changelog/matomo-%s/', $version);
+        $link = Url::addCampaignParametersToMatomoLink(sprintf('https://matomo.org/changelog/matomo-%s/', $version));
 
         return $link;
     }
@@ -116,7 +103,7 @@ class UpdateCommunication
             $mail->setDefaultFromPiwik();
             $mail->addTo($superUser['email']);
             $mail->setSubject($subject);
-            $mail->setBodyText($message);
+            $mail->setWrappedHtmlBody($message);
             $mail->send();
         }
     }

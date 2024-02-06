@@ -1,13 +1,13 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Tests\Fixtures;
 
-use Piwik\Plugins\GeoIp2\LocationProvider\GeoIp2;
+use Piwik\Config;
 use Piwik\Plugins\Goals\API as APIGoals;
 use Piwik\Plugins\SegmentEditor\API as APISegmentEditor;
 use Piwik\Plugins\UserCountry\LocationProvider;
@@ -32,24 +32,25 @@ class ManySitesImportedLogs extends Fixture
     public $includeNginxJson = false;
     public $includeApiCustomVarMapping = false;
 
-    public function setUp()
+    public function setUp(): void
     {
         $this->setUpWebsitesAndGoals();
 
         LocationProvider::$providers = null;
-        GeoIp2::$geoIPDatabaseDir = 'tests/lib/geoip-files';
         LocationProvider::setCurrentProvider('geoip2php');
 
         self::createSuperUser();
 
         $this->trackVisits();
+
+        Config::getInstance()->General['enable_browser_archiving_triggering'] = 0;
         $this->setupSegments();
+        Config::getInstance()->General['enable_browser_archiving_triggering'] = 1;
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         LocationProvider::$providers = null;
-        GeoIp2::$geoIPDatabaseDir = 'tests/lib/geoip-files';
         ManyVisitsWithGeoIP::unsetLocationProvider();
     }
 
@@ -57,7 +58,7 @@ class ManySitesImportedLogs extends Fixture
     {
         // for conversion testing
         if (!self::siteCreated($idSite = 1)) {
-            self::createWebsite($this->dateTime);
+            self::createWebsite($this->dateTime, 1);
         }
 
         if (!self::goalExists($idSite = 1, $idGoal = 1)) {
@@ -75,8 +76,8 @@ class ManySitesImportedLogs extends Fixture
         }
     }
 
-    const SEGMENT_PRE_ARCHIVED = 'visitCount<=5;visitorType!=non-existing-type;daysSinceFirstVisit<=50';
-    const SEGMENT_PRE_ARCHIVED_CONTAINS_ENCODED = 'visitCount<=5;visitorType!=re%2C%3Btest%20is%20encoded;daysSinceFirstVisit<=50';
+    const SEGMENT_PRE_ARCHIVED = 'visitCount<=5;pageUrl=@/blog/;countryCode==jp';
+    const SEGMENT_PRE_ARCHIVED_CONTAINS_ENCODED = 'visitCount<=5;pageUrl=@%2Fblog%2F;countryCode==jp';
 
     public function getDefaultSegments()
     {
@@ -86,20 +87,20 @@ class ManySitesImportedLogs extends Fixture
                                             'autoArchive'     => true,
                                             'enabledAllUsers' => true),
 
-            'segmentNoAutoArchive' => array('definition'      => 'customVariableName1==Not-bot',
+            'segmentNoAutoArchive' => array('definition'      => 'deviceBrand==Apple',
                                             'idSite'          => false,
                                             'autoArchive'     => false,
                                             'enabledAllUsers' => true),
 
-            'segmentPreArchived' => array('definition'=> self::SEGMENT_PRE_ARCHIVED,
+            'segmentPreArchived' => array('definition' => self::SEGMENT_PRE_ARCHIVED,
                                                   'idSite'          => 1,
                                                   'autoArchive'     => true,
                                                   'enabledAllUsers' => true),
 
-            'segmentPreArchivedWithUrlEncoding' => array('definition'=> self::SEGMENT_PRE_ARCHIVED_CONTAINS_ENCODED,
+            'segmentPreArchivedWithUrlEncoding' => array('definition' => self::SEGMENT_PRE_ARCHIVED_CONTAINS_ENCODED,
                                                   'idSite'          => 1,
                                                   'autoArchive'     => true,
-                                                  'enabledAllUsers' => true)
+                                                  'enabledAllUsers' => true),
 
             // fails randomly and I really could not find why.
 //            'segmentOnlySuperuser' => array('definition'      => 'actions>1;customVariablePageName1=='.urlencode('HTTP-code'),
@@ -160,7 +161,7 @@ class ManySitesImportedLogs extends Fixture
         $output = self::executeLogImporter($logFile, $opts);
         $output = implode("\n", $output);
 
-        $this->assertContains('4 filtered log lines', $output);
+        self::assertStringContainsString('4 filtered log lines', $output);
     }
 
     private function logWithIncludeFilters()
@@ -176,7 +177,7 @@ class ManySitesImportedLogs extends Fixture
         $output = self::executeLogImporter($logFile, $opts);
         $output = implode("\n", $output);
 
-        $this->assertContains('2 filtered log lines', $output);
+        self::assertStringContainsString('2 filtered log lines', $output);
     }
 
     private function setupSegments()
@@ -260,13 +261,14 @@ class ManySitesImportedLogs extends Fixture
                       '--enable-http-errors'        => false,
                       '--enable-http-redirects'     => false,
                       '--enable-reverse-dns'        => false,
-                      '--force-lowercase-path'      => false);
+                      '--force-lowercase-path'      => false,
+                      '--tracker-endpoint-path'     => '/matomo.php');
 
         self::executeLogImporter($logFile, $opts);
     }
 
     /**
-     * Logs a couple visit using log entries that are tracking requests to a piwik.php file.
+     * Logs a couple visit using log entries that are tracking requests to a matomo.php file.
      * Adds two visits to idSite=1 and two to non-existant sites.
      *
      * @param array $additonalOptions
@@ -276,8 +278,8 @@ class ManySitesImportedLogs extends Fixture
         $logFile = PIWIK_INCLUDE_PATH . '/tests/resources/access-logs/fake_logs_replay.log';
         $logFileWithHost = PIWIK_INCLUDE_PATH . '/tests/resources/access-logs/fake_logs_replay_host.log';
 
-        $opts = array('--login'                     => 'superUserLogin',
-                      '--password'                  => 'superUserPass',
+        $opts = array('--login'                     => Fixture::ADMIN_USER_LOGIN,
+                      '--password'                  => Fixture::ADMIN_USER_PASSWORD,
                       '--recorders'                 => '1',
                       '--recorder-max-payload-size' => '1',
                       '--replay-tracking'           => false,
@@ -289,13 +291,13 @@ class ManySitesImportedLogs extends Fixture
         $output = self::executeLogImporter($logFile, $opts);
         $output = implode("\n", $output);
 
-        $this->assertContains('1 filtered log lines', $output);
+        self::assertStringContainsString('1 filtered log lines', $output);
 
         // test that correct logs are excluded when the host is in the log file
         $output = self::executeLogImporter($logFileWithHost, $opts);
         $output = implode("\n", $output);
 
-        $this->assertContains('2 filtered log lines', $output);
+        self::assertStringContainsString('2 filtered log lines', $output);
     }
 
     /**

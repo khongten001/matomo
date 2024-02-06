@@ -1,14 +1,13 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Widget;
 
-use Piwik\Cache as PiwikCache;
 use Piwik\Container\StaticContainer;
 use Piwik\Development;
 use Piwik\Piwik;
@@ -173,7 +172,7 @@ class WidgetsList
      */
     public static function get()
     {
-        $list = new static;
+        $list = new static();
 
         $widgets = StaticContainer::get('Piwik\Plugin\WidgetsProvider');
 
@@ -238,10 +237,11 @@ class WidgetsList
                 // could we switch to using $value[0]?
                 $value = 'Array';
             }
-            $widgetUniqueId .= $name . urlencode($value);
+            $value = urlencode($value);
+            $value = str_replace('%', '', $value);
+            $widgetUniqueId .= $name . $value;
         }
 
         return $widgetUniqueId;
     }
-
 }

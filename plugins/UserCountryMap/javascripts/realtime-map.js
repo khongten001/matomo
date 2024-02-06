@@ -57,18 +57,8 @@
         },
 
         _initStandaloneMap: function () {
-            $('#periodString').hide();
-            initTopControls();
+            window.CoreHome.Matomo.postEvent('hidePeriodSelector');
 
-            var $rootScope = piwikHelper.getAngularDependency('$rootScope');
-            $rootScope.$on('piwikPageChange', function () {
-                var href = location.href;
-                var clickedMenuIsNotMap = !href || (href.indexOf('module=UserCountryMap&action=realtimeWorldMap') == -1);
-                if (clickedMenuIsNotMap) {
-                    $('#periodString').show();
-                    initTopControls();
-                }
-            });
             $('.realTimeMap_overlay').css('top', '0px');
             $('.realTimeMap_datetime').css('top', '20px');
         },
@@ -96,6 +86,7 @@
                 colorMode = 'default',
                 currentMap = 'world',
                 yesterday = false,
+                userHasZoomed = false,
                 colorManager = piwik.ColorManager,
                 colors = colorManager.getColors('realtime-map', ['white-bg', 'white-fill', 'black-bg', 'black-fill', 'visit-stroke',
                                                                  'website-referrer-color', 'direct-referrer-color', 'search-referrer-color',
@@ -139,8 +130,8 @@
                     method: 'Live.getLastVisitsDetails',
                     filter_limit: maxVisits,
                     showColumns: ['latitude', 'longitude', 'actions', 'lastActionTimestamp',
-                        'visitLocalTime', 'city', 'country', 'referrerType', 'referrerName',
-                        'referrerTypeName', 'browserIcon', 'operatingSystemIcon',
+                        'visitLocalTime', 'city', 'country', 'countryCode', 'referrerType', 'referrerName',
+                        'referrerTypeName', 'browserIcon', 'operatingSystemIcon', 'deviceType', 'deviceModel',
                         'countryFlag', 'idVisit', 'actionDetails', 'continentCode',
                         'actions', 'searches', 'goalConversions', 'visitorId', 'userId'].join(','),
                     minTimestamp: firstRun ? 0 : lastTimestamp
@@ -156,7 +147,7 @@
                 return $.ajax({
                     url: 'index.php?' + $.param(params),
                     dataType: 'json',
-                    data: { token_auth: tokenAuth },
+                    data: { token_auth: tokenAuth, force_api_session: broadcast.isWidgetizeRequestWithoutSession() ? 0 : 1 },
                     type: 'POST'
                 });
             }
@@ -211,18 +202,20 @@
                 var ds = new Date().getTime() / 1000 - r.lastActionTimestamp,
                     ad = r.actionDetails,
                     ico = function (src) { return '<img height="16px" src="' + src + '" alt="" class="icon" />&nbsp;'; };
-                return '<h3>' + (r.city ? r.city + ' / ' : '') + r.country + '</h3>' +
+                return '<h3>' + (r.city ? $('<span>').text(r.city).html() + ' / ' : '') + $('<span>').text(r.country).html() + '</h3>' +
                     // icons
                     ico(r.countryFlag) + ico(r.browserIcon) + ico(r.operatingSystemIcon) + '<br/>' +
+                    // device type, model, brand
+                    r.deviceType + ' (' + r.deviceModel + ')<br/>' +
                     // User ID
-                    (r.userId ? _pk_translate('General_UserId') + ':&nbsp;' + r.userId + '<br/>' : '') +
+                    (r.userId ? _pk_translate('General_UserId') + ':&nbsp;' + $('<span>').text(r.userId).html() + '<br/>' : '') +
                     // last action
-                    (ad && ad.length && ad[ad.length - 1].pageTitle ? '' + ad[ad.length - 1].pageTitle + '<br/>' : '') +
+                    (ad && ad.length && ad[ad.length - 1].pageTitle ? '' + $('<span>').text(ad[ad.length - 1].pageTitle).html() + '<br/>' : '') +
                     // time of visit
                     '<div class="rel-time" data-actiontime="' + r.lastActionTimestamp + '">' + relativeTime(ds) + '</div>' +
                     // either from or direct
                     (r.referrerType == "direct" ? r.referrerTypeName :
-                        _.from + ': ' + r.referrerName) + '<br />' +
+                        _.from + ': ' + $('<span>').text(r.referrerName).html()) + '<br />' +
                     // local time
                     '<small>' + _.local_time + ': ' + r.visitLocalTime + '</small><br />' +
                     // goals, if available
@@ -327,6 +320,7 @@
             this.$element.on('mapClick', function (e, visit, mapPath) {
                 var VisitorProfileControl = require('piwik/UI').VisitorProfileControl;
                 if (visit
+                    && piwik.visitorProfileEnabled
                     && VisitorProfileControl
                     && !self.$element.closest('.visitor-profile').length
                 ) {
@@ -410,14 +404,19 @@
                             return r.latitude !== null;
                         });
 
-                        // show warning if no visits w/ latitude
-                        $('#realTimeMapNoVisitsInfo').toggle(!report.length);
+                        if (firstRun) {
+                            // show warning if no visits w/ latitude
+                            $('#realTimeMapNoVisitsInfo').toggle(!report.length);
+                        }
                     }
 
-                    // check wether we got any geolocated visits left
+                    // check whether we got any geolocated visits left
                     if (!report.length) {
-                        $('.realTimeMap_overlay .showing_visits_of').hide();
-                        $('.realTimeMap_overlay .no_data').show();
+                        if (firstRun) {
+                            // show no visits message only if the first request did not return any data
+                            $('.realTimeMap_overlay .showing_visits_of').hide();
+                            $('.realTimeMap_overlay .no_data').show();
+                        }
                         return;
                     } else {
                         $('.realTimeMap_overlay .showing_visits_of').show();
@@ -474,6 +473,29 @@
                         else d = Math.ceil(dur / 3600) + ' ' + _.hours;
                         $('.realTimeMap_timeSpan').html(d);
 
+                        if (!userHasZoomed) {
+                            // we only apply auto zoom when user has not zoomed manually
+                            var usedContinents = [];
+                            var usedCountries = [];
+                            var aSymbol;
+                            for (var z = 0; z < visitSymbols.symbols.length; z++) {
+                                aSymbol = visitSymbols.symbols[z];
+                                if (aSymbol && aSymbol.data) {
+                                    if (aSymbol.data.continentCode && -1 === usedContinents.indexOf(aSymbol.data.continentCode)) {
+                                        usedContinents.push(aSymbol.data.continentCode);
+                                    }
+                                    if (aSymbol.data.countryCode && -1 === usedCountries.indexOf(aSymbol.data.countryCode)) {
+                                        usedCountries.push(aSymbol.data.countryCode);
+                                    }
+                                }
+                            }
+
+                            if (usedCountries.length === 1 && usedCountries[0] && usedCountries[0] !== 'unk') {
+                                updateMap(UserCountryMap.ISO2toISO3[usedCountries[0].toUpperCase()], false);
+                            } else if (usedContinents.length === 1 && usedContinents[0] && usedContinents[0] !== 'unk') {
+                                updateMap(UserCountryMap.cont2cont[usedContinents[0]], false);
+                            }
+                        }
                     }
                     firstRun = false;
                 }
@@ -505,6 +527,7 @@
                     },
                     click: function (d, p, evt) {
                         evt.stopPropagation();
+                        userHasZoomed = true;
                         if (currentMap.length == 2){   // zoom to country
                             updateMap(d.iso);
                         } else if (currentMap != 'world') {  // zoom out if zoomed in
@@ -538,7 +561,14 @@
              * updates the map view (after changing the zoom)
              * clears all existing timeouts
              */
-            function updateMap(_map) {
+            function updateMap(_map, _storeSettings) {
+                if ('undefined' === typeof _storeSettings) {
+                    _storeSettings = true;
+                }
+                if (_map && currentMap === _map && _map !== 'world') {
+                    return;
+                }
+
                 clearTimeout(nextReqTimer);
                 $.each(symbolFadeInTimer, function (i, t) {
                     clearTimeout(t);
@@ -549,14 +579,20 @@
                 } catch (e) {}
                 currentMap = _map;
                 _updateMap(currentMap + '.svg', initMap);
-                storeSettings();
+
+                if (_storeSettings) {
+                    storeSettings();
+                }
             }
 
-            updateMap(location.hash && (location.hash == '#world' || location.hash.match(/^#[A-Z]{2,3}$/)) ? location.hash.substr(1) : 'world'); // TODO: restore last state
+            updateMap(location.hash && (location.hash == '#world' || location.hash.match(/^#[A-Z]{2,3}$/)) ? location.hash.slice(1) : 'world'); // TODO: restore last state
 
             // clicking on map background zooms out
             $('.RealTimeMap_map', this.$element).off('click').click(function () {
-                if (currentMap != 'world') updateMap('world');
+                if (currentMap != 'world') {
+                    userHasZoomed = true;
+                    updateMap('world');
+                }
             });
 
             // secret gimmick shortcuts
@@ -606,7 +642,7 @@
                     var ds = new Date().getTime() / 1000 - el.data('actiontime');
                     el.html(relativeTime(ds));
                 });
-                var d = new Date(), datetime = d.toTimeString().substr(0, 8);
+                var d = new Date(), datetime = d.toTimeString().slice(0, 8);
                 $('.realTimeMap_datetime').html(datetime);
             }, 1000);
         },

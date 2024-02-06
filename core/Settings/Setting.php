@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -21,7 +21,6 @@ use Piwik\Validators\BaseValidator;
  */
 class Setting
 {
-
     /**
      * The name of the setting
      * @var string
@@ -221,6 +220,10 @@ class Setting
 
         $config = $this->configureField();
 
+        if ($config->prepare && $config->prepare instanceof \Closure) {
+            $value = call_user_func($config->prepare, $value, $this);
+        }
+
         $this->validateValue($value);
 
         if ($config->transform && $config->transform instanceof \Closure) {
@@ -273,7 +276,6 @@ class Setting
                                              array(strip_tags($config->title), $this->pluginName));
                 throw new \Exception($errorMsg);
             }
-
         } elseif ($this->type === FieldConfig::TYPE_BOOL) {
 
             if (!in_array($value, array(true, false, '0', '1', 0, 1), true)) {
@@ -338,5 +340,4 @@ class Setting
             throw new Exception('Type does not exist');
         }
     }
-
 }

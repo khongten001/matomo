@@ -1,23 +1,20 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Plugins\WebsiteMeasurable\Settings;
 use Piwik\Common;
 use Piwik\Piwik;
-use Piwik\Plugin;
 use Piwik\Settings\FieldConfig;
-use Piwik\Plugins\SitesManager;
 use Exception;
 use Piwik\UrlHelper;
 
 class Urls extends \Piwik\Settings\Measurable\MeasurableProperty
 {
-
     public function __construct($idSite)
     {
         $name = 'urls';
@@ -115,7 +112,11 @@ class Urls extends \Piwik\Settings\Measurable\MeasurableProperty
             if (empty($scheme)
                 && strpos($url, '://') === false
             ) {
-                $url = 'http://' . $url;
+                if (strpos($url, '//') === 0) {
+                    $url = 'http:' . $url;
+                } else {
+                    $url = 'http://' . $url;
+                }
             }
             $url = trim($url);
             $url = Common::sanitizeInputValue($url);

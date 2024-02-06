@@ -1,16 +1,15 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 
 namespace Piwik\Plugins\LanguagesManager\Commands;
 
-use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Output\OutputInterface;
+use Piwik\Plugin\Manager;
 
 /**
  */
@@ -22,15 +21,22 @@ class PluginsWithTranslations extends TranslationBase
              ->setDescription('Shows all plugins that have own translation files');
     }
 
-    protected function execute(InputInterface $input, OutputInterface $output)
+    protected function doExecute(): int
     {
-        $output->writeln("Following plugins contain their own translation files:");
+        $this->getOutput()->writeln("Following plugins contain their own translation files:");
 
-        $pluginFiles = glob(sprintf('%s/plugins/*/lang/en.json', PIWIK_INCLUDE_PATH));
-        $pluginFiles = array_map(function($elem){
-            return str_replace(array(sprintf('%s/plugins/', PIWIK_INCLUDE_PATH), '/lang/en.json'), '', $elem);
+        $pluginFiles = [];
+        foreach (Manager::getPluginsDirectories() as $pluginsDir) {
+            $pluginFiles = array_merge($pluginsDir, glob(sprintf('%s*/lang/en.json', $pluginsDir)));
+        }
+        $pluginFiles = array_map(function ($elem) {
+            $replace = Manager::getPluginsDirectories();
+            $replace[] = '/lang/en.json';
+            return str_replace($replace, '', $elem);
         }, $pluginFiles);
 
-        $output->writeln(join("\n", $pluginFiles));
+        $this->getOutput()->writeln(join("\n", $pluginFiles));
+
+        return self::SUCCESS;
     }
 }

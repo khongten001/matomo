@@ -1,17 +1,15 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 
 namespace Piwik\Plugins\CoreConsole\Commands;
 
-use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
-use Symfony\Component\Console\Output\OutputInterface;
+use Piwik\Plugin\Manager;
 
 /**
  */
@@ -21,18 +19,18 @@ class GenerateCommand extends GeneratePluginBase
     {
         $this->setName('generate:command')
             ->setDescription('Adds a command to an existing plugin')
-            ->addOption('pluginname', null, InputOption::VALUE_REQUIRED, 'The name of an existing plugin')
-            ->addOption('command', null, InputOption::VALUE_REQUIRED, 'The name of the command you want to create');
+            ->addRequiredValueOption('pluginname', null, 'The name of an existing plugin')
+            ->addRequiredValueOption('command', null, 'The name of the command you want to create');
     }
 
-    protected function execute(InputInterface $input, OutputInterface $output)
+    protected function doExecute(): int
     {
-        $pluginName = $this->getPluginName($input, $output);
-        $this->checkAndUpdateRequiredPiwikVersion($pluginName, $output);
+        $pluginName = $this->getPluginName();
+        $this->checkAndUpdateRequiredPiwikVersion($pluginName);
 
-        $commandName = $this->getCommandName($input, $output);
+        $commandName = $this->getCommandName();
 
-        $exampleFolder = PIWIK_INCLUDE_PATH . '/plugins/ExampleCommand';
+        $exampleFolder = Manager::getPluginDirectory('ExampleCommand');
         $replace       = array(
             'ExampleCommandDescription' => $commandName,
             'ExampleCommand' => $pluginName,
@@ -46,9 +44,11 @@ class GenerateCommand extends GeneratePluginBase
 
         $this->copyTemplateToPlugin($exampleFolder, $pluginName, $replace, $whitelistFiles);
 
-        $this->writeSuccessMessage($output, array(
+        $this->writeSuccessMessage(array(
             sprintf('Command %s for plugin %s generated', $commandName, $pluginName)
         ));
+
+        return self::SUCCESS;
     }
 
     /**
@@ -61,14 +61,12 @@ class GenerateCommand extends GeneratePluginBase
         return strtolower(preg_replace('/([a-zA-Z])(?=[A-Z])/', '$1-', $commandNameCamelCase));
     }
     /**
-     * @param InputInterface $input
-     * @param OutputInterface $output
      * @return string
      * @throws \RuntimeException
      */
-    private function getCommandName(InputInterface $input, OutputInterface $output)
+    private function getCommandName()
     {
-        $testname = $input->getOption('command');
+        $testname = $this->getInput()->getOption('command');
 
         $validate = function ($testname) {
             if (empty($testname)) {
@@ -83,8 +81,7 @@ class GenerateCommand extends GeneratePluginBase
         };
 
         if (empty($testname)) {
-            $dialog   = $this->getHelperSet()->get('dialog');
-            $testname = $dialog->askAndValidate($output, 'Enter the name of the command (CamelCase): ', $validate);
+            $testname = $this->askAndValidate('Enter the name of the command (CamelCase): ', $validate);
         } else {
             $validate($testname);
         }
@@ -94,11 +91,11 @@ class GenerateCommand extends GeneratePluginBase
         return $testname;
     }
 
-    protected function getPluginName(InputInterface $input, OutputInterface $output)
+    protected function getPluginName()
     {
         $pluginNames = $this->getPluginNames();
         $invalidName = 'You have to enter the name of an existing plugin';
 
-        return $this->askPluginNameAndValidate($input, $output, $pluginNames, $invalidName);
+        return $this->askPluginNameAndValidate($pluginNames, $invalidName);
     }
 }

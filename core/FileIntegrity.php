@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,12 +10,11 @@
 namespace Piwik;
 
 use Piwik\Container\StaticContainer;
-use Piwik\Plugins\CustomPiwikJs\Exception\AccessDeniedException;
-use Piwik\Plugins\CustomPiwikJs\TrackerUpdater;
+use Piwik\Plugins\CustomJsTracker\Exception\AccessDeniedException;
+use Piwik\Plugins\CustomJsTracker\TrackerUpdater;
 
 class FileIntegrity
 {
-
     /**
      * Get file integrity information
      *
@@ -25,11 +24,7 @@ class FileIntegrity
     {
         $messages = array();
 
-        $manifest = PIWIK_INCLUDE_PATH . '/config/manifest.inc.php';
-
-        if (file_exists($manifest)) {
-            require_once $manifest;
-        }
+        self::loadManifest();
 
         if (!class_exists('Piwik\\Manifest')) {
             $messages[] = Piwik::translate('General_WarningFileIntegrityNoManifest')
@@ -55,6 +50,32 @@ class FileIntegrity
         );
     }
 
+    /**
+     * Return just a list of the unexpected files
+     *
+     * @return array
+     */
+    public static function getUnexpectedFilesList(): array
+    {
+        self::loadManifest();
+        $files = self::getFilesFoundButNotExpected();
+        return $files;
+    }
+
+    /**
+     * Include the manifest
+     *
+     * @return void
+     */
+    private static function loadManifest(): void
+    {
+        $manifest = PIWIK_INCLUDE_PATH . '/config/manifest.inc.php';
+
+        if (file_exists($manifest)) {
+            require_once $manifest;
+        }
+    }
+
     protected static function getFilesNotInManifestButExpectedAnyway()
     {
         return StaticContainer::get('fileintegrity.ignore');
@@ -67,12 +88,12 @@ class FileIntegrity
 
             $messageDirectoriesToDelete = '';
             foreach ($directoriesFoundButNotExpected as $directoryFoundNotExpected) {
-                $messageDirectoriesToDelete .= Piwik::translate('General_ExceptionDirectoryToDelete', $directoryFoundNotExpected) . '<br/>';
+                $messageDirectoriesToDelete .= Piwik::translate('General_ExceptionDirectoryToDelete', htmlspecialchars($directoryFoundNotExpected)) . '<br/>';
             }
 
             $directories = array();
             foreach ($directoriesFoundButNotExpected as $directoryFoundNotExpected) {
-                $directories[] = realpath($directoryFoundNotExpected);
+                $directories[] = htmlspecialchars(realpath($directoryFoundNotExpected));
             }
 
             $deleteAllAtOnce = array();
@@ -98,7 +119,6 @@ class FileIntegrity
                 . '<br/>'
                 . implode('<br />', $deleteAllAtOnce)
                 . '<br/><br/>';
-
         }
 
         return $messages;
@@ -115,12 +135,12 @@ class FileIntegrity
 
             $messageFilesToDelete = '';
             foreach ($filesFoundButNotExpected as $fileFoundNotExpected) {
-                $messageFilesToDelete .= Piwik::translate('General_ExceptionFileToDelete', $fileFoundNotExpected) . '<br/>';
+                $messageFilesToDelete .= Piwik::translate('General_ExceptionFileToDelete', htmlspecialchars($fileFoundNotExpected)) . '<br/>';
             }
 
             $files = array();
             foreach ($filesFoundButNotExpected as $fileFoundNotExpected) {
-                $files[] = '"' . realpath($fileFoundNotExpected) . '"';
+                $files[] = '"' . htmlspecialchars(realpath($fileFoundNotExpected)) . '"';
             }
 
             $deleteAllAtOnce = array();
@@ -148,7 +168,6 @@ class FileIntegrity
                 . '<br/><br/>';
 
             return $messages;
-
         }
         return $messages;
     }
@@ -366,13 +385,13 @@ class FileIntegrity
 
     protected static function isModifiedPathValid($path)
     {
-        if ($path === 'piwik.js') {
+        if ($path === 'piwik.js' || $path === 'matomo.js') {
             // we could have used a postEvent hook to enrich "\Piwik\Manifest::$files;" which would also benefit plugins
             // that want to check for file integrity but we do not want to risk to break anything right now. It is not
             // as trivial because piwik.js might be already updated, or updated on the next request. We cannot define
             // 2 or 3 different filesizes and md5 hashes for one file so we check it here.
 
-            if (Plugin\Manager::getInstance()->isPluginActivated('CustomPiwikJs')) {
+            if (Plugin\Manager::getInstance()->isPluginActivated('CustomJsTracker')) {
                 $trackerUpdater = new TrackerUpdater();
 
                 if ($trackerUpdater->getCurrentTrackerFileContent() === $trackerUpdater->getUpdatedTrackerFileContent()) {
@@ -383,7 +402,7 @@ class FileIntegrity
 
                 try {
                     // the piwik.js tracker file was not updated yet, but may be updated just after the update by
-                    // one of the events CustomPiwikJs is listening to or by a scheduled task.
+                    // one of the events CustomJsTracker is listening to or by a scheduled task.
                     // In this case, we check whether such an update will succeed later and if it will, the file is
                     // valid as well as it will be updated on the next request
                     $trackerUpdater->checkWillSucceed();
@@ -391,7 +410,6 @@ class FileIntegrity
                 } catch (AccessDeniedException $e) {
                     return false;
                 }
-
             }
         }
 
@@ -460,5 +478,4 @@ class FileIntegrity
         }
         return null;
     }
-
 }

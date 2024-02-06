@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Matomo - free/libre analytics platform
  *
@@ -6,18 +7,23 @@
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
+
 namespace Piwik\Plugins\PrivacyManager\Model;
 
 use Piwik\Columns\Dimension;
 use Piwik\Columns\Join\ActionNameJoin;
 use Piwik\Common;
+use Piwik\Container\StaticContainer;
+use Piwik\Date;
 use Piwik\Db;
 use Piwik\DbHelper;
 use Piwik\Metrics\Formatter;
 use Piwik\Piwik;
 use Piwik\Plugin\LogTablesProvider;
+use Piwik\Site;
 use Piwik\Tracker\LogTable;
 use Piwik\Tracker\PageUrl;
+use Piwik\Log\LoggerInterface;
 
 class DataSubjects
 {
@@ -31,22 +37,56 @@ class DataSubjects
         $this->logTablesProvider = $logTablesProvider;
     }
 
+    private function getDistinctIdSitesInTable($tableName, $maxIdSite)
+    {
+        $tableName = Common::prefixTable($tableName);
+        $idSitesLogTable = Db::fetchAll('SELECT DISTINCT idsite FROM ' . $tableName);
+        $idSitesLogTable = array_column($idSitesLogTable, 'idsite');
+        $idSitesLogTable = array_map('intval', $idSitesLogTable);
+        $idSitesLogTable = array_filter($idSitesLogTable, function ($idSite) use ($maxIdSite) {
+            return !empty($idSite) && $idSite <= $maxIdSite;
+        });
+        return $idSitesLogTable;
+    }
+
     public function deleteDataSubjectsForDeletedSites($allExistingIdSites)
     {
         if (empty($allExistingIdSites)) {
-            return array();
+            return [];
         }
 
+        $allExistingIdSites = array_map('intval', $allExistingIdSites);
+        $maxIdSite = max($allExistingIdSites);
         $results = [];
 
-        $logTables = $this->getLogTablesToDeleteFrom();
-        $deleteCounts = $this->deleteLogDataFrom($logTables, function ($tableToSelectFrom) use ($allExistingIdSites) {
-            return $this->getWhereToChooseVisitsForOtherSites($tableToSelectFrom, $allExistingIdSites);
-        }, function ($tableToSelectFrom) {
-            return 'LEFT JOIN ' . Common::prefixTable('site') . ' site ON site.idsite = ' . $tableToSelectFrom . '.idsite';
-        });
+        $idSitesLogVisit = $this->getDistinctIdSitesInTable('log_visit', $maxIdSite);
+        $idSitesLogVisitAction = $this->getDistinctIdSitesInTable('log_link_visit_action', $maxIdSite);
+        $idSitesLogConversion = $this->getDistinctIdSitesInTable('log_conversion', $maxIdSite);
+        $idSitesUsed = array_unique(array_merge($idSitesLogVisit, $idSitesLogVisitAction, $idSitesLogConversion));
 
-        $results = array_merge($results, $deleteCounts);
+        $idSitesNoLongerExisting = array_diff($idSitesUsed, $allExistingIdSites);
+
+        if (empty($idSitesNoLongerExisting)) {
+            // nothing to be deleted... if there is no entry for that table in log_visit or log_link_visit_action
+            // then there shouldn't be anything to be deleted in other tables either
+            return [];
+        }
+
+        $logTables = $this->getLogTablesToDeleteFrom();
+        // It's quicker to call the delete queries one site at a time instead of using the IN operator and potentially
+        // creating a huge result set
+        foreach ($idSitesNoLongerExisting as $idSiteNoLongerExisting) {
+            $r = $this->deleteLogDataFrom($logTables, function ($tableToSelectFrom) use ($idSiteNoLongerExisting) {
+                return [$tableToSelectFrom . '.idsite = ' . $idSiteNoLongerExisting, []];
+            });
+            foreach ($r as $k => $v) {
+                if (!array_key_exists($k, $results)) {
+                    $results[$k] = 0;
+                }
+                $results[$k] += $v;
+            }
+        }
+
         krsort($results); // make sure test results are always in same order
         return $results;
     }
@@ -54,16 +94,16 @@ class DataSubjects
     public function deleteDataSubjects($visits)
     {
         if (empty($visits)) {
-            return array();
+            return [];
         }
 
-        $results = array();
+        $results = [];
 
         /**
          * Lets you delete data subjects to make your plugin GDPR compliant.
          * This can be useful if you have developed a plugin which stores any data for visits but doesn't
          * use any core logic to store this data. If core API's are used, for example log tables, then the data may
-         * be deleted automatically. 
+         * be deleted automatically.
          *
          * **Example**
          *
@@ -77,16 +117,63 @@ class DataSubjects
          * @param array &$visits An array with multiple visit entries containing an idvisit and idsite each. The data
          *                       for these visits is requested to be deleted.
          */
-        Piwik::postEvent('PrivacyManager.deleteDataSubjects', array(&$results, $visits));
+        Piwik::postEvent('PrivacyManager.deleteDataSubjects', [&$results, $visits]);
 
-        $logTables = $this->getLogTablesToDeleteFrom();
-        $deleteCounts = $this->deleteLogDataFrom($logTables, function ($tableToSelectFrom) use ($visits) {
-            return $this->visitsToWhereAndBind($tableToSelectFrom, $visits);
-        });
+        $datesToInvalidateByIdSite = $this->getDatesToInvalidate($visits);
+
+        $deleteCounts = $this->deleteDataSubjectsWithoutInvalidatingArchives($visits);
+
+        $this->invalidateArchives($datesToInvalidateByIdSite);
 
         $results = array_merge($results, $deleteCounts);
         krsort($results); // make sure test results are always in same order
         return $results;
+    }
+
+    private function invalidateArchives($datesToInvalidateByIdSite)
+    {
+        $invalidator = StaticContainer::get('Piwik\Archive\ArchiveInvalidator');
+
+        foreach ($datesToInvalidateByIdSite as $idSite => $visitDates) {
+            $idSites = [$idSite];
+            Piwik::postEvent('Archiving.getIdSitesToMarkArchivesAsInvalidated', array(&$idSites, $visitDates, null, null, null, $isPrivacyDeleteData = true));
+            foreach ($visitDates as $dateStr) {
+                $visitDate = Date::factory($dateStr);
+                foreach ($idSites as $siteId) {
+                    $invalidator->rememberToInvalidateArchivedReportsLater($siteId, $visitDate);
+                }
+            }
+        }
+    }
+
+    private function getDatesToInvalidate($visits)
+    {
+        $idVisitsByIdSites = [];
+        foreach ($visits as $visit) {
+            $idSite = (int)$visit['idsite'];
+            if (!isset($idVisitsByIdSites[$idSite])) {
+                $idVisitsByIdSites[$idSite] = [];
+            }
+            $idVisitsByIdSites[$idSite][] = (int)$visit['idvisit'];
+        }
+
+        $datesToInvalidate = [];
+        foreach ($idVisitsByIdSites as $idSite => $idVisits) {
+            $timezone = Site::getTimezoneFor($idSite);
+
+            $sql = 'SELECT visit_last_action_time FROM '
+                . Common::prefixTable('log_visit') . ' WHERE idsite = ' . $idSite
+                . ' AND idvisit IN (' . implode(',', $idVisits) . ')';
+
+            $resultSet = Db::fetchAll($sql);
+            $dates = [];
+            foreach ($resultSet as $row) {
+                $date = Date::factory($row['visit_last_action_time'], $timezone);
+                $dates[$date->toString('Y-m-d')] = 1;
+            }
+            $datesToInvalidate[$idSite] = array_keys($dates);
+        }
+        return $datesToInvalidate;
     }
 
     private function getLogTablesToDeleteFrom()
@@ -108,29 +195,32 @@ class DataSubjects
      * @param callable $generateWhere
      * @throws \Zend_Db_Statement_Exception
      */
-    private function deleteLogDataFrom($logTables, callable $generateWhere, callable $generateExtraJoins = null)
+    private function deleteLogDataFrom($logTables, callable $generateWhere)
     {
         $results = [];
         foreach ($logTables as $logTable) {
             $logTableName = $logTable->getName();
 
-            $from = array($logTableName);
+            $from = [$logTableName];
             $tableToSelect = $this->findNeededTables($logTable, $from);
 
             if (!$tableToSelect) {
                 throw new \Exception('Cannot join table ' . $logTable->getName());
             }
 
-            list($where, $bind) = $generateWhere($tableToSelect);
+            [$where, $bind] = $generateWhere($tableToSelect);
 
-            $extraJoins = '';
-            if ($generateExtraJoins) {
-                $extraJoins = $generateExtraJoins($tableToSelect);
+            if (count($from) === 1) {
+                $tblFrom = Common::prefixTable($logTableName);
+                $where = str_replace($logTableName . '.', $tblFrom . '.', $where);
+                $result = Db::deleteAllRows($tblFrom, ' WHERE ' . $where, '', 25000, $bind);
+            } else {
+                $tblFrom = $this->makeFromStatement($from);
+
+                // You cannot use ORDER BY or LIMIT in a multiple-table DELETE. We have to delete it all at once
+                $sql = "DELETE $logTableName FROM $tblFrom WHERE $where";
+                $result = Db::query($sql, $bind)->rowCount();
             }
-
-            $sql = "DELETE $logTableName FROM " . $this->makeFromStatement($from) . ' ' . $extraJoins . " WHERE $where";
-
-            $result = Db::query($sql, $bind)->rowCount();
 
             $results[$logTableName] = $result;
         }
@@ -154,11 +244,11 @@ class DataSubjects
             $bName = $b->getName();
             if ($bName === 'log_visit') {
                 return -1;
-            } else if ($aName === 'log_visit') {
+            } elseif ($aName === 'log_visit') {
                 return 1;
-            } else if ($bName === 'log_link_visit_action') {
+            } elseif ($bName === 'log_link_visit_action') {
                 return -1;
-            } else if ($aName === 'log_link_visit_action') {
+            } elseif ($aName === 'log_link_visit_action') {
                 return 1;
             }
 
@@ -192,7 +282,7 @@ class DataSubjects
     public function exportDataSubjects($visits)
     {
         if (empty($visits)) {
-            return array();
+            return [];
         }
 
         $logTables = $this->logTablesProvider->getAllLogTables();
@@ -202,7 +292,7 @@ class DataSubjects
 
         $dimensions = Dimension::getAllDimensions();
 
-        $results = array();
+        $results = [];
 
         foreach ($logTables as $logTable) {
             $logTableName = $logTable->getName();
@@ -210,7 +300,7 @@ class DataSubjects
                 continue; // we export these entries further below
             }
 
-            $from = array($logTableName);
+            $from = [$logTableName];
             $tableToSelect = $this->findNeededTables($logTable, $from);
 
             if (!$tableToSelect) {
@@ -219,17 +309,21 @@ class DataSubjects
                 continue;
             }
 
-            list($where, $bind) = $this->visitsToWhereAndBind($tableToSelect, $visits);
+            [$where, $bind] = $this->visitsToWhereAndBind($tableToSelect, $visits);
 
-            $select = array();
+            $select = [];
             $cols = DbHelper::getTableColumns(Common::prefixTable($logTableName));
             ksort($cols); // make sure test results will be always in same order
 
-            $binaryFields = array();
-            $dimensionPerCol = array();
+            $binaryFields = [];
+            $dimensionPerCol = [];
             foreach ($cols as $col => $config) {
                 foreach ($dimensions as $dimension) {
-                    if ($dimension->getDbTableName() === $logTableName && $dimension->getColumnName() === $col) {
+                    if (
+                        $dimension->getDbTableName() === $logTableName
+                        && $dimension->getColumnName() === $col
+                        && $dimension->getSqlSegment() === $logTableName . '.' . $col
+                    ) {
                         if ($dimension->getType() === Dimension::TYPE_BINARY) {
                             $binaryFields[] = $col;
                         }
@@ -253,7 +347,7 @@ class DataSubjects
             $idFields = $logTable->getIdColumn();
             if (!empty($idFields)) {
                 if (!is_array($idFields)) {
-                    $idFields = array($idFields);
+                    $idFields = [$idFields];
                 }
                 $sql .= ' ORDER BY ';
                 foreach ($idFields as $field) {
@@ -273,8 +367,27 @@ class DataSubjects
                 }
                 foreach ($result[$index] as $rowColumn => $rowValue) {
                     if (isset($dimensionPerCol[$rowColumn])) {
-                        $result[$index][$rowColumn] = $dimensionPerCol[$rowColumn]->formatValue($rowValue, $result[$index]['idsite'], new Formatter());
-                    } else if (!empty($rowValue)) {
+                        try {
+                            $result[$index][$rowColumn] = $dimensionPerCol[$rowColumn]->formatValue(
+                                $rowValue,
+                                $result[$index]['idsite'],
+                                new Formatter()
+                            );
+                        } catch (\Exception $e) {
+                            // if formatting failes for some reason use the raw value
+                            StaticContainer::get(LoggerInterface::class)->error(
+                                'Failed to format column {column} with dimension {dimension}: {exception}',
+                                [
+                                    'column' => $rowColumn,
+                                    'dimension' => get_class($dimensionPerCol[$rowColumn]),
+                                    'exception' => $e,
+                                    'ignoreInScreenWriter' => true,
+                                ]
+                            );
+
+                            $result[$index][$rowColumn] = $rowValue;
+                        }
+                    } elseif (!empty($rowValue)) {
                         // we try to auto detect uncompressed values so plugins have to do less themselves. makes it a bit slower but should be fine
                         $testValue = @gzuncompress($rowValue);
                         if ($testValue !== false) {
@@ -297,10 +410,10 @@ class DataSubjects
             $dimensionLogTable = $this->logTablesProvider->getLogTable($dimensionTable);
 
             if ($join && $join instanceof ActionNameJoin && $dimensionColumn && $dimensionTable && $dimensionLogTable && $dimensionLogTable->getColumnToJoinOnIdVisit()) {
-                $from = array('log_action', array('table' => $dimensionTable, 'joinOn' => "log_action.idaction = `$dimensionTable`.`$dimensionColumn`"));
+                $from = ['log_action', ['table' => $dimensionTable, 'joinOn' => "log_action.idaction = `$dimensionTable`.`$dimensionColumn`"]];
 
                 $tableToSelect = $this->findNeededTables($dimensionLogTable, $from);
-                list($where, $bind) = $this->visitsToWhereAndBind($tableToSelect, $visits);
+                [$where, $bind] = $this->visitsToWhereAndBind($tableToSelect, $visits);
                 $from = $this->makeFromStatement($from);
 
                 $sql = "SELECT log_action.idaction, log_action.name, log_action.url_prefix FROM $from WHERE $where";
@@ -319,7 +432,7 @@ class DataSubjects
                     usort($result, function ($a1, $a2) {
                         return $a1['idaction'] > $a2['idaction'] ? 1 : -1;
                     });
-                    $results['log_action_' . $dimensionTable.'_' . $dimensionColumn] = $result;
+                    $results['log_action_' . $dimensionTable . '_' . $dimensionColumn] = $result;
                 }
             }
         }
@@ -344,7 +457,7 @@ class DataSubjects
          * @param array &$visits An array with multiple visit entries containing an idvisit and idsite each. The data
          *                       for these visits is requested to be exported.
          */
-        Piwik::postEvent('PrivacyManager.exportDataSubjects', array(&$results, $visits));
+        Piwik::postEvent('PrivacyManager.exportDataSubjects', [&$results, $visits]);
 
         krsort($results); // make sure test results are always in same order
 
@@ -358,12 +471,12 @@ class DataSubjects
         if ($logTable->getColumnToJoinOnIdVisit()) {
             $tableToSelect = 'log_visit';
             if ($logTableName !== 'log_visit') {
-                $from[] = array('table' => 'log_visit', 'joinOn' => sprintf('%s.%s = %s.%s', $logTableName, $logTable->getColumnToJoinOnIdVisit(), 'log_visit', 'idvisit'));
+                $from[] = ['table' => 'log_visit', 'joinOn' => sprintf('%s.%s = %s.%s', $logTableName, $logTable->getColumnToJoinOnIdVisit(), 'log_visit', 'idvisit')];
             }
         } elseif ($logTable->getColumnToJoinOnIdAction()) {
             $tableToSelect = 'log_link_visit_action';
             if ($logTableName !== 'log_link_visit_action') {
-                $from[] = array('table' => 'log_link_visit_action', 'joinOn' => sprintf('%s.%s = %s.%s', $logTableName, $logTable->getColumnToJoinOnIdAction(), 'log_link_visit_action', 'idaction_url'));
+                $from[] = ['table' => 'log_link_visit_action', 'joinOn' => sprintf('%s.%s = %s.%s', $logTableName, $logTable->getColumnToJoinOnIdAction(), 'log_link_visit_action', 'idaction_url')];
             }
         } else {
             $tableToSelect = $this->joinNonCoreTable($logTable, $from);
@@ -388,25 +501,31 @@ class DataSubjects
 
     private function visitsToWhereAndBind($tableToSelect, $visits)
     {
-        $where = array();
-        $bind = array();
+        $where = [];
+        $bind = [];
+        $in = [];
         foreach ($visits as $visit) {
-            $where[] = '(' . $tableToSelect . '.idsite = ? AND ' . $tableToSelect . '.idvisit = ?)';
-            $bind[] = $visit['idsite'];
-            $bind[] = $visit['idvisit'];
+            if (empty($visit['idsite'])) {
+                $in[] = (int) $visit['idvisit'];
+            } else {
+                $where[] = sprintf(
+                    '(%s.idsite = %d AND %s.idvisit = %d)',
+                    $tableToSelect,
+                    (int) $visit['idsite'],
+                    $tableToSelect,
+                    (int) $visit['idvisit']
+                );
+            }
         }
         $where = implode(' OR ', $where);
+        if (!empty($in)) {
+            if (!empty($where)) {
+                $where .= ' OR ';
+            }
+            $where .= $tableToSelect . '.idvisit in (' . implode(',', $in) . ')';
+        }
 
-        return array($where, $bind);
-    }
-
-    private function getWhereToChooseVisitsForOtherSites($tableToSelect, $idSites)
-    {
-        // we also make sure we don't delete sites greater than the max idSite. this way if a site is added during
-        // an ongoing delete, the new valid data won't be deleted.
-        $maxIdSite = max($idSites);
-        $where = "site.idsite IS NULL AND $tableToSelect.idsite <= ?";
-        return [$where, [$maxIdSite]];
+        return [$where, $bind];
     }
 
     private function joinNonCoreTable(LogTable $logTable, &$from)
@@ -422,26 +541,26 @@ class DataSubjects
             $joinTable = $this->logTablesProvider->getLogTable($tableName);
 
             if ($joinTable->getColumnToJoinOnIdVisit()) {
-                $from[] = array(
+                $from[] = [
                     'table' => $joinTable->getName(),
                     'joinOn' => sprintf('%s.%s = %s.%s', $logTableName, $joinColumn, $joinTable->getName(), $joinColumn)
-                );
+                ];
                 if ($joinTable->getName() !== 'log_visit') {
-                    $from[] = array(
+                    $from[] = [
                         'table' => 'log_visit',
                         'joinOn' => sprintf('%s.%s = %s.%s', $joinTable->getName(), $joinTable->getColumnToJoinOnIdVisit(), 'log_visit', $joinTable->getColumnToJoinOnIdVisit())
-                    );
+                    ];
                 }
                 $tableToSelect = 'log_visit';
                 return $tableToSelect;
             } else {
-                $subFroms = array();
+                $subFroms = [];
                 $tableToSelect = $this->joinNonCoreTable($joinTable, $subFroms);
                 if ($tableToSelect) {
-                    $from[] = array(
+                    $from[] = [
                         'table' => $joinTable->getName(),
                         'joinOn' => sprintf('%s.%s = %s.%s', $logTableName, $joinColumn, $joinTable->getName(), $joinColumn)
-                    );
+                    ];
                     foreach ($subFroms as $subFrom) {
                         $from[] = $subFrom;
                     }
@@ -449,7 +568,19 @@ class DataSubjects
                 }
             }
         }
-
     }
 
+    /**
+     * @param $visits
+     * @return array
+     * @throws \Zend_Db_Statement_Exception
+     */
+    public function deleteDataSubjectsWithoutInvalidatingArchives($visits): array
+    {
+        $logTables = $this->getLogTablesToDeleteFrom();
+        $deleteCounts = $this->deleteLogDataFrom($logTables, function ($tableToSelectFrom) use ($visits) {
+            return $this->visitsToWhereAndBind($tableToSelectFrom, $visits);
+        });
+        return $deleteCounts;
+    }
 }

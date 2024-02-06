@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,8 +10,8 @@ namespace Piwik\Plugin;
 
 use Exception;
 use Piwik\Piwik;
+use Piwik\Url;
 use Piwik\Version;
-use Piwik\Plugin;
 
 /**
  * @see core/Version.php
@@ -80,15 +80,15 @@ class MetadataLoader
     private function getDefaultPluginInformation()
     {
         $descriptionKey = $this->pluginName . '_PluginDescription';
-        return array(
+        return [
             'description'      => $descriptionKey,
-            'homepage'         => 'https://matomo.org/',
-            'authors'          => array(array('name' => 'Matomo', 'homepage'  => 'https://matomo.org/')),
+            'homepage'         => Url::addCampaignParametersToMatomoLink('https://matomo.org/'),
+            'authors'          => [['name' => 'Matomo', 'homepage' => Url::addCampaignParametersToMatomoLink('https://matomo.org/')]],
             'license'          => 'GPL v3+',
             'version'          => Version::VERSION,
             'theme'            => false,
-            'require'          => array()
-        );
+            'require'          => []
+        ];
     }
 
     /**
@@ -133,7 +133,7 @@ class MetadataLoader
      */
     private function getPathToPluginFolder()
     {
-        return \Piwik\Plugin\Manager::getPluginsDirectory() . $this->pluginName;
+        return \Piwik\Plugin\Manager::getPluginDirectory($this->pluginName);
     }
 
     /**

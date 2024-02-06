@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -14,7 +14,6 @@ use Piwik\Piwik;
 
 class TranslationHelper
 {
-
     public function translateGoalMetricCategory($category)
     {
         // Return either "Goals by %s" or "Goals %s", depending on the category

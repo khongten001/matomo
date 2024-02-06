@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -61,9 +61,12 @@ abstract class Base extends \Piwik\Plugin\Report
         ));
     }
 
-    protected function addPresentationFilters(ViewDataTable $view, $addTotalSizeColumn = true, $addPercentColumn = false,
-                                              $sizeColumns = array('data_size', 'index_size'))
-    {
+    protected function addPresentationFilters(
+        ViewDataTable $view,
+        $addTotalSizeColumn = true,
+        $addPercentColumn = false,
+        $sizeColumns = array('data_size', 'index_size')
+    ) {
         // add total_size column
         if ($addTotalSizeColumn) {
             $getTotalTableSize = function ($dataSize, $indexSize) {
@@ -96,7 +99,6 @@ abstract class Base extends \Piwik\Plugin\Report
 
                 $view->requestConfig->filter_sort_column = 'percent_total';
             }
-
         } else if ($view->isViewDataTableId(Graph::ID)) {
             if ($addTotalSizeColumn) {
                 $view->config->columns_to_display = array('label', 'total_size');

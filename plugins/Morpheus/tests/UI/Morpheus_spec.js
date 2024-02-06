@@ -16,9 +16,15 @@ describe("Morpheus", function () {
         testEnvironment.save();
     });
 
-    it("should show all UI components and CSS classes", function (done) {
-        expect.screenshot('load').to.be.capture(function (page) {
-            page.load(url, 4000);
-        }, done);
+    it("should show all UI components and CSS classes", async function() {
+        await page.goto(url);
+        await page.waitForSelector('.progressbar img');
+        await page.evaluate(() => {
+            $('img[src~=loading],.progressbar img').each(function () {
+                $(this).hide();
+            });
+        });
+        await page.waitForTimeout(500); // wait for rendering
+        expect(await page.screenshot({ fullPage: true })).to.matchImage('load');
     });
 });

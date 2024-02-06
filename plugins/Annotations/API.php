@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,10 +10,7 @@ namespace Piwik\Plugins\Annotations;
 
 use Exception;
 use Piwik\Date;
-use Piwik\Period\Range;
-use Piwik\Period;
 use Piwik\Piwik;
-use Piwik\Plugins\CoreVisualizations\Visualizations\JqplotGraph\Evolution as EvolutionViz;
 
 /**
  * @see plugins/Annotations/AnnotationList.php
@@ -41,9 +38,9 @@ class API extends \Piwik\Plugin\API
      */
     public function add($idSite, $date, $note, $starred = 0)
     {
+        $this->checkUserCanAddNotesFor($idSite);
         $this->checkSingleIdSite($idSite, $extraMessage = "Note: Cannot add one note to multiple sites.");
         $this->checkDateIsValid($date);
-        $this->checkUserCanAddNotesFor($idSite);
 
         // add, save & return a new annotation
         $annotations = new AnnotationList($idSite);
@@ -127,8 +124,9 @@ class API extends \Piwik\Plugin\API
      */
     public function deleteAll($idSite)
     {
-        $this->checkSingleIdSite($idSite, $extraMessage = "Note: Cannot delete annotations from multiple sites.");
         Piwik::checkUserHasSuperUserAccess();
+
+        $this->checkSingleIdSite($idSite, $extraMessage = "Note: Cannot delete annotations from multiple sites.");
 
         $annotations = new AnnotationList($idSite);
 
@@ -152,8 +150,9 @@ class API extends \Piwik\Plugin\API
      */
     public function get($idSite, $idNote)
     {
-        $this->checkSingleIdSite($idSite, $extraMessage = "Note: Specify only one site ID when getting ONE note.");
         Piwik::checkUserHasViewAccess($idSite);
+
+        $this->checkSingleIdSite($idSite, $extraMessage = "Note: Specify only one site ID when getting ONE note.");
 
         // get single annotation
         $annotations = new AnnotationList($idSite);
@@ -187,7 +186,7 @@ class API extends \Piwik\Plugin\API
         $annotations = new AnnotationList($idSite);
 
         // if date/period are supplied, determine start/end date for search
-        list($startDate, $endDate) = self::getDateRangeForPeriod($date, $period, $lastN);
+        list($startDate, $endDate) = Annotations::getDateRangeForPeriod($date, $period, $lastN);
 
         return $annotations->search($startDate, $endDate);
     }
@@ -222,7 +221,7 @@ class API extends \Piwik\Plugin\API
         Piwik::checkUserHasViewAccess($idSite);
 
         // get start & end date for request. lastN is ignored if $period == 'range'
-        list($startDate, $endDate) = self::getDateRangeForPeriod($date, $period, $lastN);
+        list($startDate, $endDate) = Annotations::getDateRangeForPeriod($date, $period, $lastN);
         if ($period == 'range') {
             $period = 'day';
         }
@@ -297,48 +296,6 @@ class API extends \Piwik\Plugin\API
         if (!AnnotationList::canUserAddNotesFor($idSite)) {
             throw new Exception("The current user is not allowed to add notes for site #$idSite.");
         }
-    }
-
-    /**
-     * Returns start & end dates for the range described by a period and optional lastN
-     * argument.
-     *
-     * @param string|bool $date The start date of the period (or the date range of a range
-     *                           period).
-     * @param string $period The period type ('day', 'week', 'month', 'year' or 'range').
-     * @param bool|int $lastN Whether to include the last N periods in the range or not.
-     *                         Ignored if period == range.
-     *
-     * @return Date[]   array of Date objects or array(false, false)
-     * @ignore
-     */
-    public static function getDateRangeForPeriod($date, $period, $lastN = false)
-    {
-        if ($date === false) {
-            return array(false, false);
-        }
-
-        // if the range is just a normal period (or the period is a range in which case lastN is ignored)
-        if ($lastN === false
-            || $period == 'range'
-        ) {
-            if ($period == 'range') {
-                $oPeriod = new Range('day', $date);
-            } else {
-                $oPeriod = Period\Factory::build($period, Date::factory($date));
-            }
-
-            $startDate = $oPeriod->getDateStart();
-            $endDate = $oPeriod->getDateEnd();
-        } else // if the range includes the last N periods
-        {
-            list($date, $lastN) = EvolutionViz::getDateRangeAndLastN($period, $date, $lastN);
-            list($startDate, $endDate) = explode(',', $date);
-
-            $startDate = Date::factory($startDate);
-            $endDate = Date::factory($endDate);
-        }
-        return array($startDate, $endDate);
     }
 
     /**

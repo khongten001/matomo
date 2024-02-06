@@ -1,23 +1,20 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Tracker;
 
 use Exception;
-use PDOStatement;
 use Piwik\Common;
 use Piwik\Config;
+use Piwik\Db\Adapter;
 use Piwik\Piwik;
 use Piwik\Timer;
-use Piwik\Tracker;
 use Piwik\Tracker\Db\DbException;
-use Piwik\Tracker\Db\Mysqli;
-use Piwik\Tracker\Db\Pdo\Mysql;
 
 /**
  * Simple database wrapper.
@@ -32,6 +29,9 @@ abstract class Db
     protected $queriesProfiling = array();
 
     protected $connection = null;
+
+    // this is used for indicate TransactionLevel Cache
+    public $supportsUncommitted = null;
 
     /**
      * Enables the SQL profiling.
@@ -71,7 +71,7 @@ abstract class Db
      */
     protected function initProfiler()
     {
-        return new Timer;
+        return new Timer();
     }
 
     /**
@@ -261,18 +261,13 @@ abstract class Db
          */
         Piwik::postEvent('Tracker.getDatabaseConfig', array(&$configDb));
 
-        switch ($configDb['adapter']) {
-            case 'PDO\MYSQL':
-            case 'PDO_MYSQL': // old format pre Piwik 2
-                require_once PIWIK_INCLUDE_PATH . '/core/Tracker/Db/Pdo/Mysql.php';
-                return new Mysql($configDb);
+        $className = 'Piwik\Tracker\Db\\' . str_replace(' ', '\\', ucwords(str_replace(array('_', '\\'), ' ', strtolower($configDb['adapter']))));
 
-            case 'MYSQLI':
-                require_once PIWIK_INCLUDE_PATH . '/core/Tracker/Db/Mysqli.php';
-                return new Mysqli($configDb);
+        if (!class_exists($className)) {
+            throw new Exception('Unsupported database adapter ' . $configDb['adapter']);
         }
 
-        throw new Exception('Unsupported database adapter ' . $configDb['adapter']);
+        return new $className($configDb);
     }
 
     public static function connectPiwikTrackerDb()
@@ -286,8 +281,23 @@ abstract class Db
         }
 
         $db = self::factory($configDb);
-        $db->connect();
 
+        try {
+            $db->connect();
+        } catch (\Exception $e) {
+            $msg = Adapter::overriddenExceptionMessage($e->getMessage());
+            if ('' !== $msg) {
+                throw new \Exception($msg);
+            }
+            throw $e;
+        }
+
+        $trackerConfig = Config::getInstance()->Tracker;
+        if (!empty($trackerConfig['innodb_lock_wait_timeout']) && $trackerConfig['innodb_lock_wait_timeout'] > 0){
+            // we set this here because we only want to set this config if a connection is actually created.
+            $time = (int) $trackerConfig['innodb_lock_wait_timeout'];
+            $db->query('SET @@innodb_lock_wait_timeout = ' . $time);
+        }
         return $db;
     }
 }

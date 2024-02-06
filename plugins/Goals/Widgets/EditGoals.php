@@ -1,16 +1,15 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\Goals\Widgets;
 
+use Piwik\API\Request;
 use Piwik\Common;
-use Piwik\Piwik;
-use Piwik\Plugins\Goals\API;
 use Piwik\Widget\WidgetConfig;
 
 class EditGoals extends \Piwik\Widget\Widget
@@ -28,7 +27,7 @@ class EditGoals extends \Piwik\Widget\Widget
             return;
         }
 
-        $goals  = API::getInstance()->getGoals($idSite);
+        $goals  = Request::processRequest('Goals.getGoals', ['idSite' => $idSite, 'filter_limit' => '-1'], $default = []);
 
         $config->setName('Goals_ManageGoals');
 

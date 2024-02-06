@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Tests\Fixtures;
@@ -28,13 +28,13 @@ class TwoVisitsWithCustomVariables extends Fixture
     public $resolutionWidthToUse = 1111;
     public $resolutionHeightToUse = 222;
 
-    public function setUp()
+    public function setUp(): void
     {
         $this->setUpWebsitesAndGoals();
         $this->trackVisits();
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         // empty
     }
@@ -123,6 +123,7 @@ class TwoVisitsWithCustomVariables extends Fixture
         }
         $visitorB->setUrlReferrer('');
 
+        // Test campaigns that are specified using the _rcn tracker parameter, only conversions will be attributed to the campaign
         $attribution = array(
             ' CAMPAIGN NAME -%20YEAH! ',
             ' CAMPAIGN%20KEYWORD - RIGHT... ',

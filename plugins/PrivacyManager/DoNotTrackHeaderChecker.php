@@ -1,16 +1,16 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\PrivacyManager;
 
 use Piwik\Common;
+use Piwik\Piwik;
 use Piwik\Tracker\IgnoreCookie;
-use Piwik\Tracker\Request;
 
 /**
  * Excludes visits where user agent's request contains either:
@@ -18,10 +18,11 @@ use Piwik\Tracker\Request;
  * - X-Do-Not-Track header (used by AdBlockPlus and NoScript)
  * - DNT header (used by Mozilla)
  *
- * Note: visits from Internet Explorer and other browsers that have DoNoTrack enabled by default will be tracked anyway.
  */
 class DoNotTrackHeaderChecker
 {
+    protected $config;
+
     /**
      * @param Config $config
      */
@@ -49,8 +50,8 @@ class DoNotTrackHeaderChecker
             // this is an optional supplement to the site's tracking status resource at:
             //     /.well-known/dnt
             // per Tracking Preference Expression
-            
-            //Tracking Perference Expression has been updated to require Tk: N rather than Tk: 1
+
+            //Tracking Preference Expression has been updated to require Tk: N rather than Tk: 1
             Common::sendHeader('Tk: N');
         }
     }
@@ -70,11 +71,11 @@ class DoNotTrackHeaderChecker
             return false;
         }
 
-        $request = new Request($_REQUEST);
-        $userAgent = $request->getUserAgent();
+        $shouldIgnore = false;
 
-        if ($this->isUserAgentWithDoNotTrackAlwaysEnabled($userAgent)) {
-            Common::printDebug("INTERNET EXPLORER enable DoNotTrack by default; so Piwik ignores DNT IE browsers...");
+        Piwik::postEvent('PrivacyManager.shouldIgnoreDnt', array(&$shouldIgnore));
+        if($shouldIgnore) {
+            Common::printDebug("DoNotTrack header ignored by Matomo because of a plugin");
             return false;
         }
 
@@ -115,41 +116,5 @@ class DoNotTrackHeaderChecker
     {
         return (isset($_SERVER['HTTP_X_DO_NOT_TRACK']) && $_SERVER['HTTP_X_DO_NOT_TRACK'] === '1')
             || (isset($_SERVER['HTTP_DNT']) && substr($_SERVER['HTTP_DNT'], 0, 1) === '1');
-    }
-
-    /**
-     *
-     * @param $userAgent
-     * @return bool
-     */
-    protected function isUserAgentWithDoNotTrackAlwaysEnabled($userAgent)
-    {
-        $browsersWithDnt = $this->getBrowsersWithDNTAlwaysEnabled();
-        foreach($browsersWithDnt as $userAgentBrowserFragment) {
-            if (stripos($userAgent, $userAgentBrowserFragment) !== false) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
-     * Some browsers have DNT enabled by default. For those we will ignore DNT and always track those users.
-     *
-     * @return array
-     */
-    protected function getBrowsersWithDNTAlwaysEnabled()
-    {
-        return array(
-            // IE
-            'MSIE',
-            'Trident',
-
-            // Maxthon
-            'Maxthon',
-            
-            // Epiphany - https://github.com/piwik/piwik/issues/8682
-            'Epiphany',
-        );
     }
 }

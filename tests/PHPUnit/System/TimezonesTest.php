@@ -1,10 +1,11 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
+
 namespace Piwik\Tests\System;
 
 use Piwik\Date;
@@ -19,31 +20,190 @@ use Piwik\Tests\Fixtures\VisitsInDifferentTimezones;
  */
 class TimezonesTest extends SystemTestCase
 {
+    /**
+     * @var VisitsInDifferentTimezones
+     */
     public static $fixture = null; // initialized below class definition
+
+    public function setUp(): void
+    {
+        parent::setUp();
+
+        self::$fixture->setMockNow();
+    }
 
     public function getApiForTesting()
     {
-        $idSite = self::$fixture->idSite;
-        $date = self::$fixture->date;
+        self::$fixture->setMockNow();
 
-        return array(
-            // should have 1 visit
-            array('Live.getLastVisitsDetails', array('idSite' => $idSite,
-                                                     'date'   => $date,
-                                                     'period' => 'day')),
+        $testcases = [];
 
-            // should have 1 visit
-            array('VisitsSummary.get', array('idSite' => $idSite,
-                                             'date'   => $date,
-                                             'period' => 'day',
-                                             'testSuffix' => '_withVisit')),
+        foreach (['all' => '', '1' => '_ast', '2' => '_utc'] as $idSite => $appendix) {
+            if ($idSite !== 'all') {
+                // Note: Querying idSites=all will always use default timezone (UTC), so this is not relevant for timezone testing
+                $testcases[] = [
+                    'Live.getLastVisitsDetails',
+                    [
+                        'idSite'                 => $idSite,
+                        'date'                   => 'yesterday',
+                        'period'                 => 'day',
+                        'otherRequestParameters' => [
+                            'filter_limit'       => 100,
+                            'doNotFetchActions'  => 1,
+                        ],
+                        'testSuffix'             => '_yesterday' . $appendix,
+                    ],
+                ];
+                $testcases[] = [
+                    'Live.getLastVisitsDetails',
+                    [
+                        'idSite'                 => $idSite,
+                        'date'                   => 'today',
+                        'period'                 => 'day',
+                        'otherRequestParameters' => [
+                            'filter_limit'       => 100,
+                            'doNotFetchActions'  => 1,
+                        ],
+                        'testSuffix'             => '_today' . $appendix,
+                    ],
+                ];
+                $testcases[] = [
+                    'Live.getLastVisitsDetails',
+                    [
+                        'idSite'                 => $idSite,
+                        'date'                   => Date::yesterday() . ',' . Date::today(),
+                        'period'                 => 'range',
+                        'otherRequestParameters' => [
+                            'filter_limit'       => 100,
+                            'doNotFetchActions'  => 1,
+                        ],
+                        'testSuffix'             => '_range' . $appendix,
+                    ],
+                ];
+                $testcases[] = [
+                    'Live.getLastVisitsDetails',
+                    [
+                        'idSite'                 => $idSite,
+                        'date'                   => Date::yesterday() . ',' . Date::today(),
+                        'period'                 => 'range',
+                        'otherRequestParameters' => [
+                            'filter_limit'       => 100,
+                            'doNotFetchActions'  => 1,
+                        ],
+                        'segment'                => 'pageUrl=@example.org;pageUrl=@index',
+                        'testSuffix'             => '_range' . $appendix, // using same suffix as results are the same
+                    ],
+                ];
+                $testcases[] = [
+                    'Live.getLastVisitsDetails',
+                    [
+                        'idSite'                 => $idSite,
+                        'date'                   => Date::yesterday() . ',' . Date::today(),
+                        'period'                 => 'range',
+                        'otherRequestParameters' => [
+                            'filter_limit'       => 100,
+                            'doNotFetchActions'  => 1,
+                        ],
+                        'segment'                => 'pageUrl=@example.org;pageUrl!@index',
+                        'testSuffix'             => '_range_nomatch' . $appendix, // this segment should match nothing
+                    ],
+                ];
+                // Testing Transitions explicitly, as it builds the sql query itself, and doesn't use archiving
+                $testcases[] = [
+                    'Transitions.getTransitionsForAction',
+                    [
+                        'idSite'                 => $idSite,
+                        'date'                   => 'today',
+                        'period'                 => 'day',
+                        'otherRequestParameters' => [
+                            'actionName' => 'http://example.org/index.htm',
+                            'actionType' => 'url',
+                        ],
+                        'segment'                => 'pageUrl=@example.org;pageUrl!@index',
+                        'testSuffix'             => '_today_nomatch' . $appendix, // this segment should match nothing
+                        'xmlFieldsToRemove'      => [
+                            'date'
+                        ]
+                    ]
+                ];
+                $testcases[] = [
+                    'Transitions.getTransitionsForAction',
+                    [
+                        'idSite'                 => $idSite,
+                        'date'                   => 'today',
+                        'period'                 => 'day',
+                        'otherRequestParameters' => [
+                            'actionName' => 'http://example.org/index.htm',
+                            'actionType' => 'url',
+                        ],
+                        'testSuffix'             => '_today' . $appendix, // this segment should match nothing
+                        'xmlFieldsToRemove'      => [
+                            'date'
+                        ]
+                    ]
+                ];
+            }
+            $testcases[] = [
+                'VisitsSummary.get',
+                [
+                    'idSite'     => $idSite,
+                    'date'       => 'yesterday',
+                    'period'     => 'day',
+                    'testSuffix' => '_yesterday' . $appendix,
+                ],
+            ];
+            $testcases[] = [
+                'VisitsSummary.get',
+                [
+                    'idSite'     => $idSite,
+                    'date'       => 'yesterday',
+                    'period'     => 'day',
+                    'segment'    => 'pageUrl=@example.org;pageUrl=@index',
+                    'testSuffix' => '_yesterday' . $appendix, // using same suffix as results are the same
+                ],
+            ];
+            $testcases[] = [
+                'VisitsSummary.get',
+                [
+                    'idSite'     => $idSite,
+                    'date'       => 'yesterday',
+                    'period'     => 'day',
+                    'segment'    => 'pageUrl=@example.org;pageUrl!@index',
+                    'testSuffix' => '_yesterday_nomatch' . $appendix, // this segment should match nothing
+                ],
+            ];
+            $testcases[] = [
+                'VisitsSummary.get',
+                [
+                    'idSite'     => $idSite,
+                    'date'       => 'today',
+                    'period'     => 'day',
+                    'testSuffix' => '_today' . $appendix,
+                ],
+            ];
+            $testcases[] = [
+                'VisitsSummary.get',
+                [
+                    'idSite'     => $idSite,
+                    'date'       => 'today',
+                    'period'     => 'day',
+                    'segment'    => 'pageUrl=@example.org;pageUrl=@index',
+                    'testSuffix' => '_today' . $appendix, // using same suffix as results are the same
+                ],
+            ];
+            $testcases[] = [
+                'VisitsSummary.get',
+                [
+                    'idSite'     => $idSite,
+                    'date'       => 'today',
+                    'period'     => 'day',
+                    'segment'    => 'pageUrl=@example.org;pageUrl!@index',
+                    'testSuffix' => '_today_nomatch' . $appendix, // this segment should match nothing
+                ],
+            ];
+        }
 
-            // should have no visits
-            array('VisitsSummary.get', array('idSite' => $idSite,
-                                             'date'   => Date::factory($date)->addDay(1)->getDatetime(),
-                                             'period' => 'day',
-                                             'testSuffix' => '_dayAfterVisit')),
-        );
+        return $testcases;
     }
 
     /**

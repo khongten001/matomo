@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -19,9 +19,10 @@ class Order extends BaseConversion
     protected $columnName = 'idorder';
     protected $type = self::TYPE_NUMBER;
     protected $category = 'Goals_Ecommerce';
-    protected $nameSingular = 'Ecommerce_Order';
+    protected $nameSingular = 'Ecommerce_OrderId';
     protected $namePlural = 'Ecommerce_Orders';
     protected $metricId = 'orders';
+    protected $segmentName = 'orderId';
 
     public function configureMetrics(MetricsList $metricsList, DimensionMetricFactory $dimensionMetricFactory)
     {
@@ -33,5 +34,4 @@ class Order extends BaseConversion
     {
         return new Discriminator($this->dbTableName, 'idgoal', GoalManager::IDGOAL_ORDER);
     }
-
 }

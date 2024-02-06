@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -12,6 +12,7 @@ use Piwik\Piwik;
 use Piwik\Plugin\ViewDataTable;
 use Piwik\Plugins\UserCountry\Columns\Country;
 use Piwik\Plugins\UserCountry\LocationProvider;
+use Piwik\Url;
 
 class GetCountry extends Base
 {
@@ -30,7 +31,6 @@ class GetCountry extends Base
     public function configureView(ViewDataTable $view)
     {
         $view->config->show_exclude_low_population = false;
-        $view->config->addTranslation('label', $this->dimension->getName());
         $view->config->documentation = $this->documentation;
 
         $view->requestConfig->filter_limit = 5;
@@ -39,10 +39,9 @@ class GetCountry extends Base
             // if we're using the default location provider, add a note explaining how it works
             $footerMessage = Piwik::translate("General_Note") . ': '
                 . Piwik::translate('UserCountry_DefaultLocationProviderExplanation',
-                    array('<a rel="noreferrer noopener" target="_blank" href="https://matomo.org/docs/geo-locate/">', '</a>'));
+                    ['<a rel="noreferrer noopener" target="_blank" href="' . Url::addCampaignParametersToMatomoLink('https://matomo.org/docs/geo-locate/') . '">', '</a>']);
 
             $view->config->show_footer_message = $footerMessage;
         }
     }
-
 }

@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -14,12 +14,11 @@ use Piwik\Period;
 use Piwik\Period\Month;
 use Piwik\Period\Week;
 use Piwik\Period\Year;
-use Piwik\Translation\Translator;
 
 /**
  * @group Core
  */
-class PeriodTest extends \PHPUnit_Framework_TestCase
+class PeriodTest extends \PHPUnit\Framework\TestCase
 {
     public function testGetId()
     {
@@ -37,24 +36,26 @@ class PeriodTest extends \PHPUnit_Framework_TestCase
     {
         $period = new Day(Date::today());
         $label = $period->getLabel();
-        $this->assertInternalType('string', $label);
+        self::assertIsString($label);
         $this->assertNotEmpty($label);
         $period = new Week(Date::today());
         $label = $period->getLabel();
-        $this->assertInternalType('string', $label);
+        self::assertIsString($label);
         $this->assertNotEmpty($label);
         $period = new Month(Date::today());
         $label = $period->getLabel();
-        $this->assertInternalType('string', $label);
+        self::assertIsString($label);
         $this->assertNotEmpty($label);
         $period = new Year(Date::today());
         $label = $period->getLabel();
-        $this->assertInternalType('string', $label);
+        self::assertIsString($label);
         $this->assertNotEmpty($label);
     }
 
     public function testValidate_ValidDates()
     {
+        self::expectNotToPerformAssertions();
+
         Period::checkDateFormat('today');
         Period::checkDateFormat('yesterday');
         Period::checkDateFormat('yesterdaySameTime');
@@ -68,12 +69,13 @@ class PeriodTest extends \PHPUnit_Framework_TestCase
     }
 
     /**
-     * @expectedException \Exception
-     * @expectedExceptionMessage Date format must be: YYYY-MM-DD, or 'today' or 'yesterday' or any keyword supported by the strtotime function (see http://php.net/strtotime for more information):
      * @dataProvider getInvalidDateFormats
      */
     public function testValidate_InvalidDates($invalidDateFormat)
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('Date format must be: YYYY-MM-DD, or \'today\' or \'yesterday\' or any keyword supported by the strtotime function (see http://php.net/strtotime for more information):');
+
         Period::checkDateFormat($invalidDateFormat);
     }
 
@@ -88,17 +90,76 @@ class PeriodTest extends \PHPUnit_Framework_TestCase
             array('foobar'),
         );
     }
-    
+
     /**
-     * @expectedException \Exception
-     * @expectedExceptionMessage is a date before first website was online. Try date that's after
+     * @dataProvider getTestDataForToString
+     */
+    public function test_toString_CreatesCommaSeparatedStringList($periodType, $date, $format, $expected)
+    {
+        $period = Period\Factory::build($periodType, $date);
+        $actual = $period->toString($format);
+        $this->assertEquals($expected, $actual);
+    }
+
+    public function getTestDataForToString()
+    {
+        return [
+            ['day', '2012-02-03', 'Y-m-d', '2012-02-03'],
+            ['day', '2012-02-03', 'Y_m', '2012_02'],
+
+            ['week', '2012-02-04', 'Y-m-d', [
+                '2012-01-30',
+                '2012-01-31',
+                '2012-02-01',
+                '2012-02-02',
+                '2012-02-03',
+                '2012-02-04',
+                '2012-02-05',
+            ]],
+            ['month', '2012-02-04', 'Y-m-d', [
+                '2012-02-01',
+                '2012-02-02',
+                '2012-02-03',
+                '2012-02-04',
+                '2012-02-05',
+                '2012-02-06,2012-02-07,2012-02-08,2012-02-09,2012-02-10,2012-02-11,2012-02-12',
+                '2012-02-13,2012-02-14,2012-02-15,2012-02-16,2012-02-17,2012-02-18,2012-02-19',
+                '2012-02-20,2012-02-21,2012-02-22,2012-02-23,2012-02-24,2012-02-25,2012-02-26',
+                '2012-02-27',
+                '2012-02-28',
+                '2012-02-29',
+            ]],
+            ['month', '2012-02-04', 'Y-m', [
+                '2012-02',
+                '2012-02',
+                '2012-02',
+                '2012-02',
+                '2012-02',
+                '2012-02,2012-02,2012-02,2012-02,2012-02,2012-02,2012-02',
+                '2012-02,2012-02,2012-02,2012-02,2012-02,2012-02,2012-02',
+                '2012-02,2012-02,2012-02,2012-02,2012-02,2012-02,2012-02',
+                '2012-02',
+                '2012-02',
+                '2012-02',
+            ]],
+            ['range', '2012-03-05,2012-03-12', 'Y-m-d', [
+                '2012-03-05,2012-03-06,2012-03-07,2012-03-08,2012-03-09,2012-03-10,2012-03-11',
+                '2012-03-12',
+            ]],
+        ];
+    }
+
+    /**
      * @dataProvider getInvalidDatesBeforeFirstWebsite
      */
     public function testValidate_InvalidDatesBeforeFirstWebsite($invalidDatesBeforeFirstWebsite)
     {
+        $this->expectException(\Exception::class);
+        $this->expectExceptionMessage('is a date before first website was online. Try date that\'s after');
+
         Period::checkDateFormat($invalidDatesBeforeFirstWebsite);
     }
-    
+
     public function getInvalidDatesBeforeFirstWebsite()
     {
         return array(
@@ -192,5 +253,84 @@ class PeriodTest extends \PHPUnit_Framework_TestCase
         return array_map(function (Period $period) {
             return array($period->getLabel(), $period->getRangeString());
         }, $periods);
+    }
+
+    /**
+     * @dataProvider getTestDataForIsDateInPeriod
+     */
+    public function test_isDateInPeriod($date, $period, $periodDate, $expected)
+    {
+        $date = Date::factory($date);
+        $period = Period\Factory::build($period, $periodDate);
+
+        $actual = $period->isDateInPeriod($date);
+        $this->assertEquals($expected, $actual);
+    }
+
+    public function getTestDataForIsDateInPeriod()
+    {
+        return [
+            ['2014-02-03 00:00:00', 'day', '2014-02-03 03:04:05', true],
+            ['2014-02-03 00:00:00', 'week', '2014-02-03 03:04:05', true],
+            ['2014-02-03 00:00:00', 'month', '2014-02-03 03:04:05', true],
+            ['2014-02-02 23:59:59', 'day', '2014-02-03 03:04:05', false],
+            ['2014-01-31 23:59:59', 'month', '2014-02-03 03:04:05', false],
+            ['2014-03-01 00:00:00', 'month', '2014-02-03 03:04:05', false],
+            ['2014-03-31 23:59:59', 'month', '2014-03-03 03:04:05', true],
+        ];
+    }
+
+    /**
+     * @dataProvider getTestDataForIsPeriodIntersectingWith
+     */
+    public function test_isPeriodIntersectingWith($date1, $period1, $date2, $period2, $expected)
+    {
+        $period1Obj = Period\Factory::build($period1, $date1);
+        $period2Obj = Period\Factory::build($period2, $date2);
+        $actual = $period1Obj->isPeriodIntersectingWith($period2Obj);
+        $this->assertEquals($expected, $actual);
+    }
+
+    public function getTestDataForIsPeriodIntersectingWith()
+    {
+        return [
+            ['2015-03-04', 'day', '2015-03-04', 'day', true],
+            ['2015-03-04', 'day', '2015-03-04', 'week', true],
+            ['2015-03-04', 'day', '2015-03-12', 'week', false],
+            ['2015-03-04', 'week', '2015-03-08', 'day', true],
+            ['2015-03-04', 'week', '2015-03-09', 'day', false],
+            ['2015-03-04', 'month', '2015-03-09', 'day', true],
+            ['2015-03-04', 'month', '2015-03-01', 'week', true],
+            ['2015-03-04', 'month', '2015-02-28', 'week', true],
+            ['2015-03-01', 'month', '2015-02-28', 'month', false],
+            ['2015-03-01', 'week', '2015-02-28', 'week', true],
+            ['2015-03-04', 'year', '2015-03-01', 'day', true],
+            ['2015-03-04', 'year', '2016-03-01', 'week', false],
+        ];
+    }
+
+    /**
+     * @dataProvider getTestDataForGetBoundsInTimezone
+     */
+    public function test_getBoundsInTimezone($period, $date, $timezone, $expectedDate1, $expectedDate2)
+    {
+        $periodObj = Period\Factory::build($period, $date);
+
+        list($date1, $date2) = $periodObj->getBoundsInTimezone($timezone);
+
+        $this->assertEquals($expectedDate1, $date1->getDatetime());
+        $this->assertEquals($expectedDate2, $date2->getDatetime());
+    }
+
+    public function getTestDataForGetBoundsInTimezone()
+    {
+        return [
+            ['day', '2018-03-04', 'America/Los_Angeles', '2018-03-04 08:00:00', '2018-03-05 07:59:59'],
+            ['day', '2018-03-04', 'UTC+8', '2018-03-03 16:00:00', '2018-03-04 15:59:59'],
+            ['day', '2018-03-04', 'UTC-8', '2018-03-04 08:00:00', '2018-03-05 07:59:59'],
+            ['week', '2018-03-04', 'America/Los_Angeles', '2018-02-26 08:00:00', '2018-03-05 07:59:59'],
+            ['week', '2018-03-04', 'UTC-4', '2018-02-26 04:00:00', '2018-03-05 03:59:59'],
+            ['week', '2018-03-04', 'UTC', '2018-02-26 00:00:00', '2018-03-04 23:59:59'],
+        ];
     }
 }

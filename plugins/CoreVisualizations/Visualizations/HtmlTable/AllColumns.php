@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,9 +10,7 @@
 namespace Piwik\Plugins\CoreVisualizations\Visualizations\HtmlTable;
 
 use Piwik\DataTable;
-use Piwik\Metrics;
 use Piwik\Plugins\CoreVisualizations\Visualizations\HtmlTable;
-use Piwik\View;
 
 /**
  * DataTable Visualization that derives from HtmlTable and sets show_extra_columns to true.
@@ -33,7 +31,7 @@ class AllColumns extends HtmlTable
     public function beforeGenericFiltersAreAppliedToLoadedDataTable()
     {
         $this->config->datatable_css_class = 'dataTableVizAllColumns';
-        
+
         $this->dataTable->filter('AddColumnsProcessedMetrics');
 
         $properties = $this->config;
@@ -63,10 +61,14 @@ class AllColumns extends HtmlTable
 
             $properties->columns_to_display = $columnsToDisplay;
         });
+
+        parent::beforeGenericFiltersAreAppliedToLoadedDataTable();
     }
 
     public function beforeLoadDataTable()
     {
+        parent::beforeLoadDataTable();
+
         unset($this->requestConfig->request_parameters_to_modify['pivotBy']);
         unset($this->requestConfig->request_parameters_to_modify['pivotByColumn']);
     }

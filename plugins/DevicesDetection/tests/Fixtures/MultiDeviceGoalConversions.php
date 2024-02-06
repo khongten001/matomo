@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 namespace Piwik\Plugins\DevicesDetection\tests\Fixtures;
@@ -20,7 +20,7 @@ class MultiDeviceGoalConversions extends Fixture
     public $idSite   = 1;
     public $idGoal   = 1;
 
-    public function setUp()
+    public function setUp(): void
     {
         $this->setUpWebsitesAndGoals();
         $this->trackSmartphoneVisits();
@@ -28,7 +28,7 @@ class MultiDeviceGoalConversions extends Fixture
         $this->trackOtherVisits();
     }
 
-    public function tearDown()
+    public function tearDown(): void
     {
         // empty
     }
@@ -159,6 +159,8 @@ class MultiDeviceGoalConversions extends Fixture
         $t = self::getTracker($this->idSite, $this->getAdjustedDateTime(1.6), $defaultInit = true);
 
         $t->setUserAgent('Mozilla/5.0 (Windows NT 6.1; WOW64; Trident/7.0; Banca Caboto s.p.a.; rv:11.0) like Gecko');
+        // The client hints below should change the OS to Windows 11 and browser to Edge 95.5.2
+        $t->setClientHints('', 'Windows', '14.0.0', '" Not A;Brand";v="99", "Chromium";v="95", "Microsoft Edge";v="95"', '95.5.2');
 
         $t->setUrl('http://example.org/index.htm');
         self::checkResponse($t->doTrackPageView('0'));

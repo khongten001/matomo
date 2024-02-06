@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,9 +10,11 @@ namespace Piwik;
 
 use Exception;
 use Piwik\Access\CapabilitiesProvider;
+use Piwik\API\Request;
 use Piwik\Access\RolesProvider;
 use Piwik\Container\StaticContainer;
 use Piwik\Plugins\SitesManager\API as SitesManagerApi;
+use Piwik\Session\SessionAuth;
 
 /**
  * Singleton that manages user access to Piwik resources.
@@ -117,7 +119,7 @@ class Access
             'view'      => array(),
             'write'     => array(),
             'admin'     => array(),
-            'superuser' => array()
+            'superuser' => array(),
         );
     }
 
@@ -153,8 +155,34 @@ class Access
             return false;
         }
 
+        $result = null;
+
+        $forceApiSessionPost = Common::getRequestVar('force_api_session', 0, 'int', $_POST);
+        $forceApiSessionGet = Common::getRequestVar('force_api_session', 0, 'int', $_GET);
+        $isApiRequest = Piwik::getModule() === 'API' && (Piwik::getAction() === 'index' || !Piwik::getAction());
+        $apiMethod = Request::getMethodIfApiRequest(null);
+        $isGetApiRequest = !empty($apiMethod) && 1 === substr_count($apiMethod, '.') && strpos($apiMethod, '.get') > 0;
+
+        if (($forceApiSessionPost && $isApiRequest) || ($forceApiSessionGet && $isApiRequest && $isGetApiRequest)) {
+            $request = ($forceApiSessionGet && $isApiRequest && $isGetApiRequest) ? $_GET : $_POST;
+            $tokenAuth = Common::getRequestVar('token_auth', '', 'string', $request);
+            Session::start();
+            $auth = StaticContainer::get(SessionAuth::class);
+            $auth->setTokenAuth($tokenAuth);
+            $result = $auth->authenticate();
+            // Note: We do not post a failed login event at this point on purpose
+            // If using the SessionAuth doesn't work, the FrontController will try to reload the Auth using
+            // the token_auth only. If that works everything is "fine" and the `force_api_session` parameter was
+            // unneeded. If that fails as well it will trigger the failed login event
+            // See FrontController::init() or Request::reloadAuthUsingTokenAuth()
+            Session::close();
+            // if not successful, we will fallback to regular auth
+        }
+
         // access = array ( idsite => accessIdSite, idsite2 => accessIdSite2)
-        $result = $this->auth->authenticate();
+        if (!$result || !$result->wasAuthenticationSuccessful()) {
+            $result = $this->auth->authenticate();
+        }
 
         if (!$result->wasAuthenticationSuccessful()) {
             return false;
@@ -221,8 +249,8 @@ class Access
         } elseif (isset($this->login)) {
             if (empty($this->idsitesByAccess['view'])
                 && empty($this->idsitesByAccess['write'])
-                && empty($this->idsitesByAccess['admin'])) {
-
+                && empty($this->idsitesByAccess['admin'])
+            ) {
                 // we join with site in case there are rows in access for an idsite that doesn't exist anymore
                 // (backward compatibility ; before we deleted the site without deleting rows in _access table)
                 $accessRaw = $this->getRawSitesWithSomeViewAccess($this->login);
@@ -231,7 +259,7 @@ class Access
                     $accessType = $access['access'];
                     $this->idsitesByAccess[$accessType][] = $access['idsite'];
 
-                    if ($this->roleProvider->isValidRole($access)) {
+                    if ($this->roleProvider->isValidRole($accessType)) {
                         foreach ($this->capabilityProvider->getAllCapabilities() as $capability) {
                             if ($capability->hasRoleCapability($accessType)) {
                                 // we automatically add this capability
@@ -243,6 +271,35 @@ class Access
                         }
                     }
                 }
+
+                /**
+                 * Triggered after the initial access levels and permissions for the current user are loaded. Use this
+                 * event to modify the current user's permissions (for example, making sure every user has view access
+                 * to a specific site).
+                 *
+                 * **Example**
+                 *
+                 *     function (&$idsitesByAccess, $login) {
+                 *         if ($login == 'somespecialuser') {
+                 *             return;
+                 *         }
+                 *
+                 *         $idsitesByAccess['view'][] = $mySpecialIdSite;
+                 *     }
+                 *
+                 * @param array[] &$idsitesByAccess The current user's access levels for individual sites. Maps role and
+                 *                                  capability IDs to list of site IDs, eg:
+                 *
+                 *                                  ```
+                 *                                  [
+                 *                                      'view' => [1, 2, 3],
+                 *                                      'write' => [4, 5],
+                 *                                      'admin' => [],
+                 *                                  ]
+                 *                                  ```
+                 * @param string $login The current user's login.
+                 */
+                Piwik::postEvent('Access.modifyUserAccess', [&$this->idsitesByAccess, $this->login]);
             }
         }
     }
@@ -309,8 +366,7 @@ class Access
                 $this->idsitesByAccess['view'],
                 $this->idsitesByAccess['write'],
                 $this->idsitesByAccess['admin'],
-                $this->idsitesByAccess['superuser'])
-        );
+                $this->idsitesByAccess['superuser']));
     }
 
     /**
@@ -327,8 +383,7 @@ class Access
         return array_unique(array_merge(
                 $this->idsitesByAccess['write'],
                 $this->idsitesByAccess['admin'],
-                $this->idsitesByAccess['superuser'])
-        );
+                $this->idsitesByAccess['superuser']));
     }
 
     /**
@@ -343,8 +398,7 @@ class Access
 
         return array_unique(array_merge(
                 $this->idsitesByAccess['admin'],
-                $this->idsitesByAccess['superuser'])
-        );
+                $this->idsitesByAccess['superuser']));
     }
 
     /**
@@ -383,7 +437,7 @@ class Access
     public function checkUserHasSuperUserAccess()
     {
         if (!$this->hasSuperUserAccess()) {
-            throw new NoAccessException(Piwik::translate('General_ExceptionPrivilege', array("'superuser'")));
+            $this->throwNoAccessException(Piwik::translate('General_ExceptionPrivilege', array("'superuser'")));
         }
     }
 
@@ -427,7 +481,7 @@ class Access
     public function checkUserHasSomeWriteAccess()
     {
         if (!$this->isUserHasSomeWriteAccess()) {
-            throw new NoAccessException(Piwik::translate('General_ExceptionPrivilegeAtLeastOneWebsite', array('write')));
+            $this->throwNoAccessException(Piwik::translate('General_ExceptionPrivilegeAtLeastOneWebsite', array('write')));
         }
     }
 
@@ -439,7 +493,7 @@ class Access
     public function checkUserHasSomeAdminAccess()
     {
         if (!$this->isUserHasSomeAdminAccess()) {
-            throw new NoAccessException(Piwik::translate('General_ExceptionPrivilegeAtLeastOneWebsite', array('admin')));
+            $this->throwNoAccessException(Piwik::translate('General_ExceptionPrivilegeAtLeastOneWebsite', array('admin')));
         }
     }
 
@@ -457,7 +511,7 @@ class Access
         $idSitesAccessible = $this->getSitesIdWithAtLeastViewAccess();
 
         if (count($idSitesAccessible) == 0) {
-            throw new NoAccessException(Piwik::translate('General_ExceptionPrivilegeAtLeastOneWebsite', array('view')));
+            $this->throwNoAccessException(Piwik::translate('General_ExceptionPrivilegeAtLeastOneWebsite', array('view')));
         }
     }
 
@@ -479,7 +533,7 @@ class Access
 
         foreach ($idSites as $idsite) {
             if (!in_array($idsite, $idSitesAccessible)) {
-                throw new NoAccessException(Piwik::translate('General_ExceptionPrivilegeAccessWebsite', array("'admin'", $idsite)));
+                $this->throwNoAccessException(Piwik::translate('General_ExceptionPrivilegeAccessWebsite', array("'admin'", $idsite)));
             }
         }
     }
@@ -502,7 +556,7 @@ class Access
 
         foreach ($idSites as $idsite) {
             if (!in_array($idsite, $idSitesAccessible)) {
-                throw new NoAccessException(Piwik::translate('General_ExceptionPrivilegeAccessWebsite', array("'view'", $idsite)));
+                $this->throwNoAccessException(Piwik::translate('General_ExceptionPrivilegeAccessWebsite', array("'view'", $idsite)));
             }
         }
     }
@@ -525,8 +579,18 @@ class Access
 
         foreach ($idSites as $idsite) {
             if (!in_array($idsite, $idSitesAccessible)) {
-                throw new NoAccessException(Piwik::translate('General_ExceptionPrivilegeAccessWebsite', array("'write'", $idsite)));
+                $this->throwNoAccessException(Piwik::translate('General_ExceptionPrivilegeAccessWebsite', array("'write'", $idsite)));
             }
+        }
+    }
+
+    public function checkUserIsNotAnonymous()
+    {
+        if ($this->hasSuperUserAccess()) {
+            return;
+        }
+        if (Piwik::isUserIsAnonymous()) {
+            $this->throwNoAccessException(Piwik::translate('General_YouMustBeLoggedIn'));
         }
     }
 
@@ -549,7 +613,7 @@ class Access
 
         foreach ($idSites as $idsite) {
             if (!in_array($idsite, $idSitesAccessible)) {
-                throw new NoAccessException(Piwik::translate('ExceptionCapabilityAccessWebsite', array("'" . $capability ."'", $idsite)));
+                $this->throwNoAccessException(Piwik::translate('General_ExceptionCapabilityAccessWebsite', array("'" . $capability . "'", $idsite)));
             }
         }
 
@@ -571,7 +635,7 @@ class Access
         $idSites = Site::getIdSitesFromIdSitesString($idSites);
 
         if (empty($idSites)) {
-            throw new NoAccessException("The parameter 'idSite=' is missing from the request.");
+            $this->throwNoAccessException("The parameter 'idSite=' is missing from the request.");
         }
 
         return $idSites;
@@ -590,17 +654,29 @@ class Access
     {
         $isSuperUser = self::getInstance()->hasSuperUserAccess();
 
+        if ($isSuperUser) {
+            return $function();
+        }
+
         $access = self::getInstance();
+        $login = $access->getLogin();
+        $shouldResetLogin = empty($login); // make sure to reset login if a login was set by "makeSureLoginNameIsSet()"
         $access->setSuperUserAccess(true);
 
         try {
             $result = $function();
-        } catch (Exception $ex) {
+        } catch (\Throwable $ex) {
             $access->setSuperUserAccess($isSuperUser);
+            if ($shouldResetLogin) {
+                $access->login = null;
+            }
 
             throw $ex;
         }
 
+        if ($shouldResetLogin) {
+            $access->login = null;
+        }
         $access->setSuperUserAccess($isSuperUser);
 
         return $result;
@@ -651,13 +727,39 @@ class Access
         }
         return $result;
     }
-}
 
-/**
- * Exception thrown when a user doesn't have sufficient access to a resource.
- *
- * @api
- */
-class NoAccessException extends \Exception
-{
+    /**
+     * Throw a NoAccessException with the given message, or a more generic 'You need to log in' message if the
+     * user is not currently logged in (e.g. if session has expired).
+     *
+     * @param $message
+     * @throws NoAccessException
+     */
+    private function throwNoAccessException($message)
+    {
+        if (Piwik::isUserIsAnonymous() && !Request::isRootRequestApiRequest()) {
+            $message = Piwik::translate('General_YouMustBeLoggedIn');
+
+            // Try to detect whether user was previously logged in so that we can display a different message
+            $referrer = Url::getReferrer();
+            $matomoUrl = SettingsPiwik::getPiwikUrl();
+            if ($referrer && $matomoUrl && Url::isValidHost(Url::getHostFromUrl($referrer)) &&
+                strpos($referrer, $matomoUrl) === 0
+            ) {
+                $message = Piwik::translate('General_YourSessionHasExpired');
+            }
+        }
+
+        throw new NoAccessException($message);
+    }
+
+    /**
+     * Returns true if the current user is logged in or not.
+     *
+     * @return bool
+     */
+    public function isUserLoggedIn()
+    {
+        return !empty($this->login);
+    }
 }

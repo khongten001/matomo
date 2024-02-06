@@ -1,15 +1,19 @@
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
  * DataTable UI class for JqplotGraph.
  *
  * @link http://www.jqplot.com
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
-(function ($, require) {
+function rowEvolutionGetMetricNameFromRow(tr)
+{
+    return $(tr).find('td [data-name]').text().trim();
+}
 
+(function ($, require) {
     var exports = require('piwik/UI'),
         DataTable = exports.DataTable,
         dataTablePrototype = DataTable.prototype,
@@ -20,7 +24,7 @@
 
             return window.piwik.jqplotLabelFont || 'Arial';
         }
-        ;
+    ;
 
     exports.getLabelFontFamily = getLabelFontFamily;
 
@@ -52,7 +56,9 @@
                 exportText: _pk_translate('General_SaveImageOnYourComputer'),
                 metricsToPlot: _pk_translate('General_MetricsToPlot'),
                 metricToPlot: _pk_translate('General_MetricToPlot'),
-                recordsToPlot: _pk_translate('General_RecordsToPlot')
+                recordsToPlot: _pk_translate('General_RecordsToPlot'),
+                incompletePeriod: _pk_translate('General_IncompletePeriod'),
+                invalidatedPeriod: _pk_translate('General_InvalidatedPeriod')
             };
 
             // set a unique ID for the graph element (required by jqPlot)
@@ -68,6 +74,7 @@
 
             this.data = graphData.data;
             this._setJqplotParameters(graphData.params);
+            this._setDataStates(graphData.dataStates);
 
             if (this.props.display_percentage_in_tooltip) {
                 this._setTooltipPercentages();
@@ -87,6 +94,14 @@
             // render initially)
             var self = this;
             setTimeout(function () { self.render(); }, 1);
+        },
+
+        _setDataStates: function (dataStates) {
+            this.jqplotParams.dataStates = [];
+
+            if (Array.isArray(dataStates)) {
+                this.jqplotParams.dataStates = dataStates;
+            }
         },
 
         _setJqplotParameters: function (params) {
@@ -117,11 +132,18 @@
                             formatString: '%s',
                             formatter: $.jqplot.NumberFormatter
                         }
-                    }
+                    },
                 }
             };
 
             this.jqplotParams = $.extend(true, {}, defaultParams, params);
+
+            for (var i = 2; typeof this.jqplotParams.axes['y' + i + 'axis'] != 'undefined'; i++) {
+                this.jqplotParams.axes['y' + i + 'axis'].tickOptions = $.extend(true, {}, {
+                  formatString: '%s',
+                  formatter: $.jqplot.NumberFormatter
+                }, this.jqplotParams.axes['y' + i + 'axis'].tickOptions);
+            }
 
             this._setColors();
         },
@@ -161,9 +183,9 @@
             target.on('jqplotDataHighlight', function (e, seriesIndex, valueIndex) {
                 self._showDataPointTooltip(this, seriesIndex, valueIndex);
             })
-            .on('jqplotDataUnhighlight', function () {
-                self._destroyDataPointTooltip($(this));
-            });
+                .on('jqplotDataUnhighlight', function () {
+                    self._destroyDataPointTooltip($(this));
+                });
 
             // handle window resize
             this._plotWidth = target.innerWidth();
@@ -387,9 +409,7 @@
             // TODO: this code destroys plots when a page is switched. there must be a better way of managing memory.
             if (typeof $.jqplot.visiblePlots == 'undefined') {
                 $.jqplot.visiblePlots = [];
-                var $rootScope = piwikHelper.getAngularDependency('$rootScope');
-
-                $rootScope.$on('piwikPageChange', function () {
+                window.CoreHome.Matomo.on('matomoPageChange', function () {
                     for (var i = 0; i < $.jqplot.visiblePlots.length; i++) {
                         if ($.jqplot.visiblePlots[i] == null) {
                             continue;
@@ -451,7 +471,6 @@
                 title: lang.exportTitle,
                 modal: true,
                 width: 'auto',
-                position: ['center', 'center'],
                 resizable: false,
                 autoOpen: true,
                 open: function (event, ui) {
@@ -471,11 +490,47 @@
 
         /** Generate ticks in y direction */
         setYTicks: function () {
+            var $tempAxisElement = $('<div>').attr('class', 'jqplot-axis jqplot-y2axis').css({'visibility': 'hidden', 'display': 'inline-block'});
+            $('<span>')
+                .css('font-size', this.jqplotParams.axesDefaults.fontSize)
+                .css('font-family', this.jqplotParams.axesDefaults.fontFamily)
+                .appendTo($tempAxisElement);
+            $('body').append($tempAxisElement);
+
             // default axis
             this.setYTicksForAxis('yaxis', this.jqplotParams.axes.yaxis);
+
             // other axes: y2axis, y3axis...
+            var axisLength = 10;
             for (var i = 2; typeof this.jqplotParams.axes['y' + i + 'axis'] != 'undefined'; i++) {
                 this.setYTicksForAxis('y' + i + 'axis', this.jqplotParams.axes['y' + i + 'axis']);
+
+                axisLength += getAxisWidth(this.jqplotParams.axes['y' + i + 'axis']);
+            }
+
+            var axesShown = {};
+            this.jqplotParams.series.forEach(function (series) {
+                axesShown[series.yaxis] = true;
+            });
+            var hasMultipleAxes = Object.keys(axesShown).length > 1;
+
+            // only adjust width if more than one axis exists AND more than one series shown
+            if (hasMultipleAxes) {
+                $('.piwik-graph', this.$element).css('width', 'calc(100% - ' + axisLength + 'px)');
+            } else {
+                $('.piwik-graph', this.$element).css('width', '');
+            }
+
+            $tempAxisElement.remove();
+
+            function getAxisWidth(axis) {
+                var maxWidth = 0;
+                axis.ticks.forEach(function (tick) {
+                    var tickFormatted = $.jqplot.NumberFormatter(axis.tickOptions.formatString || '%s', tick);
+                    $tempAxisElement.find('span').text(tickFormatted);
+                    maxWidth = Math.max(maxWidth, $tempAxisElement.width());
+                });
+                return maxWidth;
             }
         },
 
@@ -505,7 +560,12 @@
             }
 
             // make sure percent axes don't go above 100%
-            if (axis.tickOptions.formatString.substring(2, 3) == '%' && maxCrossDataSets > 100) {
+            if (
+              axis.tickOptions
+              && axis.tickOptions.formatString
+              && axis.tickOptions.formatString.endsWith('%')
+              && maxCrossDataSets > 100
+            ) {
                 maxCrossDataSets = 100;
             }
 
@@ -549,9 +609,42 @@
             new seriesPickerClass(this.targetDivId, this, initiallyShowAll);
 
             if (!initiallyShowAll) {
-                // initially, show only the first series
-                this.data = [this.data[0]];
-                this.jqplotParams.series = [this.jqplotParams.series[0]];
+
+                var initialMetrics = 0;
+                var $rowEvolution = $('#'+this.targetDivId).closest('.rowevolution');
+
+                var newData = [];
+                var newSeries = [];
+                if ($rowEvolution.data('initialMetrics')) {
+                    initialMetrics = $rowEvolution.data('initialMetrics');
+
+                    if (Array.isArray(initialMetrics)) {
+                        for (var j = 0; j < initialMetrics.length; j++) {
+                            // find index of series and data
+                            for (var k = 0; k < this.jqplotParams.series.length; k++) {
+                                if (this.jqplotParams.series[k]
+                                    && this.jqplotParams.series[k].label
+                                    && this.jqplotParams.series[k].label === initialMetrics[j]) {
+
+                                    newData.push(this.data[k]);
+                                    newSeries.push(this.jqplotParams.series[k]);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (newData.length) {
+                    // restore original selection
+                    this.data = newData;
+                    this.jqplotParams.series = newSeries;
+                } else {
+                    // initially, show only the first series
+                    this.data = [this.data[0]];
+                    this.jqplotParams.series = [this.jqplotParams.series[0]];
+                }
+
                 this.setYTicks();
             }
         },
@@ -560,14 +653,12 @@
          * Sets the colors used to render this graph.
          */
         _setColors: function () {
-            var colorManager = piwik.ColorManager,
-                seriesColorNames = ['series1', 'series2', 'series3', 'series4', 'series5',
-                                    'series6', 'series7', 'series8', 'series9', 'series10'];
+            var colorManager = piwik.ColorManager;
 
             var viewDataTable = $('#' + this.workingDivId).data('uiControlObject').param['viewDataTable'];
 
-            var graphType;
-            if (viewDataTable == 'graphEvolution') {
+            var graphType = '';
+            if (viewDataTable == 'graphEvolution' || viewDataTable == 'graphStackedBarEvolution') {
                 graphType = 'evolution';
             } else if (viewDataTable == 'graphPie') {
                 graphType = 'pie';
@@ -577,11 +668,31 @@
 
             var namespace = graphType + '-graph-colors';
 
-            this.jqplotParams.seriesColors = colorManager.getColors(namespace, seriesColorNames, true);
+            this._setSeriesColors(namespace);
+
             this.jqplotParams.grid.background = colorManager.getColor(namespace, 'grid-background');
             this.jqplotParams.grid.borderColor = colorManager.getColor(namespace, 'grid-border');
             this.tickColor = colorManager.getColor(namespace, 'ticks');
             this.singleMetricColor = colorManager.getColor(namespace, 'single-metric-label')
+        },
+
+        _setSeriesColors: function (namespace) {
+            var colorManager = piwik.ColorManager,
+                seriesColorNames = ['series0', 'series1', 'series2', 'series3', 'series4', 'series5',
+                    'series6', 'series7', 'series8', 'series9', 'series10'];
+
+            var comparisonService = window.CoreHome.ComparisonsStoreInstance;
+            if (comparisonService.isComparing() && typeof this.jqplotParams.series[0].seriesIndex !== 'undefined') {
+                namespace = 'comparison-series-color';
+
+                seriesColorNames = [];
+                this.jqplotParams.series.forEach(function (s) {
+                    var seriesColorName = comparisonService.getSeriesColorName(s.seriesIndex, s.metricIndex);
+                    seriesColorNames.push(seriesColorName);
+                });
+            }
+
+            this.jqplotParams.seriesColors = colorManager.getColors(namespace, seriesColorNames, true);
         }
     });
 
@@ -623,26 +734,21 @@ JQPlotExternalSeriesToggle.prototype = {
 
     // show a single series
     showSeries: function (i) {
-        for (var j = 0; j < this.activated.length; j++) {
-            this.activated[j] = (i == j);
-        }
+        this.activated = [i];
         this.replot();
     },
 
     // toggle a series (make plotting multiple series possible)
     toggleSeries: function (i) {
-        var activatedCount = 0;
-        for (var k = 0; k < this.activated.length; k++) {
-            if (this.activated[k]) {
-                activatedCount++;
+        if (this.activated.indexOf(i) > -1) {
+            // need to remove the metric
+            if (this.activated.length > 1) {
+                // prevent removing the only visible metric
+                this.activated.splice(this.activated.indexOf(i), 1);
             }
+        } else {
+            this.activated.push(i);
         }
-        if (activatedCount == 1 && this.activated[i]) {
-            // prevent removing the only visible metric
-            return;
-        }
-
-        this.activated[i] = !this.activated[i];
         this.replot();
     },
 
@@ -656,17 +762,27 @@ JQPlotExternalSeriesToggle.prototype = {
         config.params.series = [];
         config.params.axes = {xaxis: this.originalAxes.xaxis};
         config.params.seriesColors = [];
+
         for (var j = 0; j < this.activated.length; j++) {
-            if (!this.activated[j]) {
-                continue;
-            }
-            config.data.push(this.originalData[j]);
-            config.params.seriesColors.push(this.originalSeriesColors[j]);
-            config.params.series.push($.extend(true, {}, this.originalSeries[j]));
-            // build array of used axes
-            var axis = this.originalSeries[j].yaxis;
-            if ($.inArray(axis, usedAxes) == -1) {
-                usedAxes.push(axis);
+            // find index of series and data
+            for (var k = 0; k < this.originalSeries.length; k++) {
+                if (this.originalSeries[k]
+                    && this.originalSeries[k].label
+                    && (
+                      this.originalSeries[k].label === this.activated[j]
+                      || piwikHelper.htmlDecode(this.originalSeries[k].label) === this.activated[j]
+                    )
+                ) {
+                    config.data.push(this.originalData[k]);
+                    config.params.seriesColors.push(this.originalSeriesColors[k]);
+                    config.params.series.push($.extend(true, {}, this.originalSeries[k]));
+                    // build array of used axes
+                    var axis = this.originalSeries[k].yaxis;
+                    if ($.inArray(axis, usedAxes) == -1) {
+                        usedAxes.push(axis);
+                    }
+                    break;
+                }
             }
         }
 
@@ -706,50 +822,93 @@ RowEvolutionSeriesToggle.prototype = JQPlotExternalSeriesToggle.prototype;
 
 RowEvolutionSeriesToggle.prototype.attachEvents = function () {
     var self = this;
-    this.seriesPickers = this.target.closest('.rowevolution').find('table.metrics tr');
+
+    var $rowEvolution = this.target.closest('.rowevolution');
+    this.seriesPickers = $rowEvolution.find('table.metrics tr');
+
+    var initialMetrics = [];
+
+    if ($rowEvolution.data('initialMetrics')) {
+        initialMetrics = [];
+        var savedMetrics = $rowEvolution.data('initialMetrics');
+        var existingMetricsInSeries = [];
+        var m = 0;
+        for (m = 0; m < this.originalSeries.length; m++) {
+            existingMetricsInSeries.push(this.originalSeries[m].label);
+        }
+        for (m = 0; m < savedMetrics.length; m++) {
+            if (existingMetricsInSeries.indexOf(savedMetrics[m]) > -1) {
+                // only if it exists... for example unique visitors etc might not be available for some metrics,
+                // then we need to make sure to highlight the default first metric for example
+                initialMetrics.push(savedMetrics[m]);
+            }
+        }
+    }
 
     this.seriesPickers.each(function (i) {
         var el = $(this);
-        el.off('click').on('click', function (e) {
-            if (e.shiftKey) {
-                self.toggleSeries(i);
 
+        el.off('click').on('click', function (e) {
+            var metricName = rowEvolutionGetMetricNameFromRow(this);
+            // we are storing this info on the element as the series picker and the jqplot object gets recreated whenever
+            // we change a period so we cannot persist the selection there.
+            if (e.shiftKey) {
+                self.toggleSeries(metricName);
                 document.getSelection().removeAllRanges(); // make sure chrome doesn't select text
             } else {
-                self.showSeries(i);
+                self.showSeries(metricName);
             }
+            $rowEvolution.data('initialMetrics', self.activated);
             return false;
         });
 
-        if (i == 0 || self.initiallyShowAll) {
-            // show the active series
-            // if initiallyShowAll, all are active; otherwise only the first one
-            self.activated.push(true);
-        } else {
-            // fade out the others
-            el.find('td').css('opacity', .5);
-            self.activated.push(false);
+        var label = rowEvolutionGetMetricNameFromRow(el);
+        var metricExists = false;
+        for (var k = 0; k < self.originalSeries.length; k++) {
+            if (self.originalSeries[k] && labelMatches(self.originalSeries[k].label, label)) {
+                metricExists = true;
+            }
         }
 
-        // prevent selecting in ie & opera (they don't support doing this via css)
-        if ($.browser.msie) {
-            this.ondrag = function () { return false; };
-            this.onselectstart = function () { return false; };
-        } else if ($.browser.opera) {
-            $(this).attr('unselectable', 'on');
+        if (!metricExists) {
+            el.hide();
+        } else if (
+            (initialMetrics.length === 0 && i == 0)
+            || (initialMetrics.length > 0 && initialMetrics.indexOf(label) > -1)
+            || self.initiallyShowAll) {
+            // show the active series
+            // if initiallyShowAll, all are active; otherwise only the first one
+            if (!el.hasClass('hiddenByDefault')) {
+                el.show();
+            }
+            el.find('td').css('opacity', '');
+            self.activated.push(rowEvolutionGetMetricNameFromRow(el));
+        } else {
+            if (!el.hasClass('hiddenByDefault')) {
+                el.show();
+            }
+            // fade out the others
+            el.find('td').css('opacity', .5);
+        }
+
+        // the API outputs the label double encoded when it shouldn't. so when looking for a matching label we have
+        // to check if one is double encoded.
+        function labelMatches(lhs, rhs) {
+            return lhs === rhs || piwikHelper.htmlDecode(lhs) === rhs || lhs === piwikHelper.htmlDecode(rhs);
         }
     });
 };
 
 RowEvolutionSeriesToggle.prototype.beforeReplot = function () {
+    var self = this;
     // fade out if not activated
-    for (var i = 0; i < this.activated.length; i++) {
-        if (this.activated[i]) {
-            this.seriesPickers.eq(i).find('td').css('opacity', 1);
-        } else {
-            this.seriesPickers.eq(i).find('td').css('opacity', .5);
+    this.seriesPickers.find('td').css('opacity', .5);
+    this.seriesPickers.each(function (i) {
+        var name = rowEvolutionGetMetricNameFromRow(this);
+        if (self.activated.indexOf(name) > -1) {
+            $(this).find('td').css('opacity', 1);
         }
-    }
+    });
 };
 
 // ------------------------------------------------------------
@@ -871,7 +1030,7 @@ RowEvolutionSeriesToggle.prototype.beforeReplot = function () {
         ctx.restore();
     }
 
-    // tigger the event jqplotPiwikTickOver when the mosue enters
+    // trigger the event jqplotPiwikTickOver when the mouse enters
     // and new tick. this is used for tooltips.
     function handleMouseMove(ev, gridpos, datapos, neighbor, plot) {
         var c = plot.plugins.piwikTicks;
@@ -913,7 +1072,9 @@ RowEvolutionSeriesToggle.prototype.beforeReplot = function () {
             c.markerRenderer.init();
 
             var position = series.gridData[tick];
-            c.markerRenderer.draw(position[0], position[1], c.piwikHighlightCanvas._ctx);
+            if (typeof position !== 'undefined') {
+                c.markerRenderer.draw(position[0], position[1], c.piwikHighlightCanvas._ctx);
+            }
         }
     }
 
@@ -1043,7 +1204,8 @@ RowEvolutionSeriesToggle.prototype.beforeReplot = function () {
         // handle placeSeriesPicker event
         var plot = this;
         $(seriesPicker).bind('placeSeriesPicker', function () {
-            this.domElem.css('margin-left', (plot._gridPadding.left + plot.plugins.canvasLegend.width - 1) + 'px');
+            this.domElem.css('margin-left', plot._gridPadding.left + 'px');
+            $('.jqplot-legend-canvas', $('#' + target)).css({paddingLeft: '34px'});
             plot.baseCanvas._elem.before(this.domElem);
         });
 
@@ -1143,7 +1305,7 @@ RowEvolutionSeriesToggle.prototype.beforeReplot = function () {
             // move close labels
             if (lastY2 !== false && lastRight == right && (
                 (right && y2 - lastY2 < 13) ||
-                    (!right && lastY2 - y2 < 13))) {
+                (!right && lastY2 - y2 < 13))) {
 
                 if (x1 > center[0]) {
                     // move down if the label is in the right half of the graph
@@ -1198,3 +1360,467 @@ RowEvolutionSeriesToggle.prototype.beforeReplot = function () {
     $.jqplot.postDrawHooks.push($.jqplot.PieLegend.postDraw);
 
 })(jQuery, require);
+
+// ------------------------------------------------------------
+//  MATOMO INCOMPLETE DATA INDICATOR FOR JQPLOT
+//  Show a dashed line to the last point to indicate incomplete
+// ------------------------------------------------------------
+
+(function ($) {
+
+    $.jqplot.LineRenderer.prototype.draw = function(ctx, gd, options, plot) {
+        var i;
+        // get a copy of the options, so we don't modify the original object.
+        var opts = $.extend(true, {}, options);
+        var shadow = (opts.shadow != undefined) ? opts.shadow : this.shadow;
+        var showLine = (opts.showLine != undefined) ? opts.showLine : this.showLine;
+        var fill = (opts.fill != undefined) ? opts.fill : this.fill;
+        var fillAndStroke = (opts.fillAndStroke != undefined) ? opts.fillAndStroke : this.fillAndStroke;
+        var xmin, ymin, xmax, ymax;
+
+        // Only change in this overridden method, to pass the option to the renderers
+        if (plot.options.hasOwnProperty('dataStates')) {
+            opts.dataStates = plot.options.dataStates;
+        }
+
+        if (!Array.isArray(opts.dataStates)) {
+            opts.dataStates = [];
+        }
+
+        ctx.save();
+        if (gd.length) {
+            if (showLine) {
+                // if we fill, we'll have to add points to close the curve.
+                if (fill) {
+                    if (this.fillToZero) {
+                        // have to break line up into shapes at axis crossings
+                        var negativeColor = this.negativeColor;
+                        if (! this.useNegativeColors) {
+                            negativeColor = opts.fillStyle;
+                        }
+                        var isnegative = false;
+                        var posfs = opts.fillStyle;
+
+                        // if stoking line as well as filling, get a copy of line data.
+                        if (fillAndStroke) {
+                            var fasgd = gd.slice(0);
+                        }
+                        // if not stacked, fill down to axis
+                        if (this.index == 0 || !this._stack) {
+
+                            var tempgd = [];
+                            var pd = (this.renderer.smooth) ? this.renderer._smoothedPlotData : this._plotData;
+                            this._areaPoints = [];
+                            var pyzero = this._yaxis.series_u2p(this.fillToValue);
+                            var pxzero = this._xaxis.series_u2p(this.fillToValue);
+
+                            opts.closePath = true;
+
+                            if (this.fillAxis == 'y') {
+                                tempgd.push([gd[0][0], pyzero]);
+                                this._areaPoints.push([gd[0][0], pyzero]);
+
+                                for (var i=0; i<gd.length-1; i++) {
+                                    tempgd.push(gd[i]);
+                                    this._areaPoints.push(gd[i]);
+                                    // do we have an axis crossing?
+                                    if (pd[i][1] * pd[i+1][1] <= 0) {
+                                        if (pd[i][1] < 0) {
+                                            isnegative = true;
+                                            opts.fillStyle = negativeColor;
+                                        }
+                                        else {
+                                            isnegative = false;
+                                            opts.fillStyle = posfs;
+                                        }
+
+                                        var xintercept = gd[i][0] + (gd[i+1][0] - gd[i][0]) * (pyzero-gd[i][1])/(gd[i+1][1] - gd[i][1]);
+                                        tempgd.push([xintercept, pyzero]);
+                                        this._areaPoints.push([xintercept, pyzero]);
+                                        // now draw this shape and shadow.
+                                        if (shadow) {
+                                            this.renderer.shadowRenderer.draw(ctx, tempgd, opts);
+                                        }
+                                        this.renderer.shapeRenderer.draw(ctx, tempgd, opts);
+                                        // now empty temp array and continue
+                                        tempgd = [[xintercept, pyzero]];
+                                        // this._areaPoints = [[xintercept, pyzero]];
+                                    }
+                                }
+                                if (pd[gd.length-1][1] < 0) {
+                                    isnegative = true;
+                                    opts.fillStyle = negativeColor;
+                                }
+                                else {
+                                    isnegative = false;
+                                    opts.fillStyle = posfs;
+                                }
+                                tempgd.push(gd[gd.length-1]);
+                                this._areaPoints.push(gd[gd.length-1]);
+                                tempgd.push([gd[gd.length-1][0], pyzero]);
+                                this._areaPoints.push([gd[gd.length-1][0], pyzero]);
+                            }
+                            // now draw the last area.
+                            if (shadow) {
+                                this.renderer.shadowRenderer.draw(ctx, tempgd, opts);
+                            }
+                            this.renderer.shapeRenderer.draw(ctx, tempgd, opts);
+
+                        }
+                        // if stacked, fill to line below
+                        else {
+                            var prev = this._prevGridData;
+                            for (var i=prev.length; i>0; i--) {
+                                gd.push(prev[i-1]);
+                                // this._areaPoints.push(prev[i-1]);
+                            }
+                            if (shadow) {
+                                this.renderer.shadowRenderer.draw(ctx, gd, opts);
+                            }
+                            this._areaPoints = gd;
+                            this.renderer.shapeRenderer.draw(ctx, gd, opts);
+                        }
+                    }
+                    /////////////////////////
+                    // Not filled to zero
+                    ////////////////////////
+                    else {
+                        // if stoking line as well as filling, get a copy of line data.
+                        if (fillAndStroke) {
+                            var fasgd = gd.slice(0);
+                        }
+                        // if not stacked, fill down to axis
+                        if (this.index == 0 || !this._stack) {
+                            // var gridymin = this._yaxis.series_u2p(this._yaxis.min) - this.gridBorderWidth / 2;
+                            var gridymin = ctx.canvas.height;
+                            // IE doesn't return new length on unshift
+                            gd.unshift([gd[0][0], gridymin]);
+                            var len = gd.length;
+                            gd.push([gd[len - 1][0], gridymin]);
+                        }
+                        // if stacked, fill to line below
+                        else {
+                            var prev = this._prevGridData;
+                            for (var i=prev.length; i>0; i--) {
+                                gd.push(prev[i-1]);
+                            }
+                        }
+                        this._areaPoints = gd;
+
+                        if (shadow) {
+                            this.renderer.shadowRenderer.draw(ctx, gd, opts);
+                        }
+
+                        this.renderer.shapeRenderer.draw(ctx, gd, opts);
+                    }
+                    if (fillAndStroke) {
+                        var fasopts = $.extend(true, {}, opts, {fill:false, closePath:false});
+                        this.renderer.shapeRenderer.draw(ctx, fasgd, fasopts);
+                        // now draw the markers
+                        if (this.markerRenderer.show) {
+                            if (this.renderer.smooth) {
+                                fasgd = this.gridData;
+                            }
+                            for (i=0; i<fasgd.length; i++) {
+                                this.markerRenderer.draw(fasgd[i][0], fasgd[i][1], ctx, opts.markerOptions);
+                            }
+                        }
+                    }
+                }
+                else {
+
+                    if (this.renderer.bands.show) {
+                        var bdat;
+                        var bopts = $.extend(true, {}, opts);
+
+                        if (this.renderer.bands.showLines) {
+                            bdat = (this.renderer.smooth) ? this.renderer._hiBandSmoothedData : this.renderer._hiBandGridData;
+                            this.renderer.shapeRenderer.draw(ctx, bdat, opts);
+                            bdat = (this.renderer.smooth) ? this.renderer._lowBandSmoothedData : this.renderer._lowBandGridData;
+                            this.renderer.shapeRenderer.draw(ctx, bdat, bopts);
+                        }
+
+                        if (this.renderer.bands.fill) {
+                            if (this.renderer.smooth) {
+                                bdat = this.renderer._hiBandSmoothedData.concat(this.renderer._lowBandSmoothedData.reverse());
+                            }
+                            else {
+                                bdat = this.renderer._hiBandGridData.concat(this.renderer._lowBandGridData.reverse());
+                            }
+                            this._areaPoints = bdat;
+                            bopts.closePath = true;
+                            bopts.fill = true;
+                            bopts.fillStyle = this.renderer.bands.fillColor;
+                            this.renderer.shapeRenderer.draw(ctx, bdat, bopts);
+                        }
+                    }
+
+                    if (shadow) {
+                        this.renderer.shadowRenderer.draw(ctx, gd, opts);
+                    }
+
+                    this.renderer.shapeRenderer.draw(ctx, gd, opts);
+                }
+            }
+            // calculate the bounding box
+            var xmin = xmax = ymin = ymax = null;
+            for (i=0; i<this._areaPoints.length; i++) {
+                var p = this._areaPoints[i];
+                if (xmin > p[0] || xmin == null) {
+                    xmin = p[0];
+                }
+                if (ymax < p[1] || ymax == null) {
+                    ymax = p[1];
+                }
+                if (xmax < p[0] || xmax == null) {
+                    xmax = p[0];
+                }
+                if (ymin > p[1] || ymin == null) {
+                    ymin = p[1];
+                }
+            }
+
+            if (this.type === 'line' && this.renderer.bands.show) {
+                ymax = this._yaxis.series_u2p(this.renderer.bands._min);
+                ymin = this._yaxis.series_u2p(this.renderer.bands._max);
+            }
+
+            this._boundingBox = [[xmin, ymax], [xmax, ymin]];
+
+            // now draw the markers
+            if (this.markerRenderer.show && !fill) {
+                if (this.renderer.smooth) {
+                    gd = this.gridData;
+                }
+                for (i = 0; i < gd.length; i++) {
+                    if (gd[i][0] === null || gd[i][1] === null) {
+                        continue;
+                    }
+
+                    const markerOptions = opts.markerOptions || {};
+
+                    markerOptions.isIncomplete = opts.dataStates[i] && opts.dataStates[i] !== 'complete';
+                    markerOptions.incompleteFillColor = plot.grid.background;
+
+                    this.markerRenderer.draw(gd[i][0], gd[i][1], ctx, markerOptions);
+                }
+            }
+        }
+
+        ctx.restore();
+    };
+
+    $.jqplot.ShapeRenderer.prototype.draw = function(ctx, points, options) {
+        ctx.save();
+        var opts = (options != null) ? options : {};
+        var fill = (opts.fill != null) ? opts.fill : this.fill;
+        var closePath = (opts.closePath != null) ? opts.closePath : this.closePath;
+        var fillRect = (opts.fillRect != null) ? opts.fillRect : this.fillRect;
+        var strokeRect = (opts.strokeRect != null) ? opts.strokeRect : this.strokeRect;
+        var clearRect = (opts.clearRect != null) ? opts.clearRect : this.clearRect;
+        var isarc = (opts.isarc != null) ? opts.isarc : this.isarc;
+        var linePattern = (opts.linePattern != null) ? opts.linePattern : this.linePattern;
+        var ctxPattern = $.jqplot.LinePattern(ctx, linePattern);
+        ctx.lineWidth = opts.lineWidth || this.lineWidth;
+        ctx.lineJoin = opts.lineJoin || this.lineJoin;
+        ctx.lineCap = opts.lineCap || this.lineCap;
+        ctx.strokeStyle = (opts.strokeStyle || opts.color) || this.strokeStyle;
+        ctx.fillStyle = opts.fillStyle || this.fillStyle;
+        ctx.beginPath();
+
+        let dataStates = [];
+
+        if (!closePath && !fill && Array.isArray(opts.dataStates)) {
+            // only do the incomplete visualization for line charts
+            dataStates = opts.dataStates;
+        }
+
+        if (isarc) {
+            ctx.arc(points[0], points[1], points[2], points[3], points[4], true);
+
+            if (closePath) {
+                ctx.closePath();
+            }
+
+            if (fill) {
+                ctx.fill();
+            }
+            else {
+                ctx.stroke();
+            }
+
+            if (opts.isIncomplete && opts.incompleteFillColor) {
+                // graph lines reach into the point
+                // render inner point filled with background color to avoid showing them
+                ctx.beginPath();
+                ctx.arc(points[0], points[1], points[2] / 8, points[3], points[4], true);
+                ctx.strokeStyle = opts.incompleteFillColor;
+                ctx.stroke();
+                ctx.closePath();
+            }
+
+            ctx.restore();
+            return;
+        }
+        else if (clearRect) {
+            ctx.clearRect(points[0], points[1], points[2], points[3]);
+            ctx.restore();
+            return;
+        }
+        else if (fillRect || strokeRect) {
+            if (fillRect) {
+                ctx.fillRect(points[0], points[1], points[2], points[3]);
+            }
+            if (strokeRect) {
+                ctx.strokeRect(points[0], points[1], points[2], points[3]);
+                ctx.restore();
+                return;
+            }
+        }
+
+        if (!points || !points.length) {
+            return;
+        }
+
+        let move = true;
+
+        for (let i = 0; i < points.length; i++) {
+            // skip to the first non-null point and move to it.
+            if (null === points[i][0] && null === points[i][1]) {
+                continue;
+            }
+
+            if (move) {
+                move = false;
+
+                ctxPattern.moveTo(points[i][0], points[i][1]);
+                continue;
+            }
+
+            // draw line to current point or skip if incomplete data point
+            if (dataStates[i] && 'complete' !== dataStates[i]) {
+                ctxPattern.moveTo(points[i][0], points[i][1]);
+            } else {
+                ctxPattern.lineTo(points[i][0], points[i][1]);
+            }
+        }
+
+        if (closePath) {
+            ctxPattern.closePath();
+        }
+
+        if (fill) {
+            ctx.fill();
+        } else {
+            ctx.stroke();
+        }
+
+        // draw dashed lines for incomplete data points
+        ctx.beginPath();
+        ctx.setLineDash([3, 3]);
+
+        move = true;
+
+        for (let i = 0; i < points.length; i++) {
+            // skip to the first non-null point and move to it.
+            if (points[i][0] === null && points[i][1] === null) {
+                continue;
+            }
+
+            if (move) {
+                move = false;
+
+                ctxPattern.moveTo(points[i][0], points[i][1]);
+                continue;
+            }
+
+            // draw dashed line to current point or skip if not incomplete data point
+            if (!dataStates[i] || 'complete' === dataStates[i]) {
+                ctxPattern.moveTo(points[i][0], points[i][1]);
+            } else {
+                ctxPattern.lineTo(points[i][0], points[i][1]);
+            }
+        }
+
+        ctx.stroke();
+        ctx.closePath();
+        ctx.restore();
+    };
+
+    // Only overriding this method to prevent drawing the shadow for the last line segment
+    $.jqplot.ShadowRenderer.prototype.draw = function(ctx, points, options) {
+        ctx.save();
+        var opts = (options != null) ? options : {};
+        var fill = (opts.fill != null) ? opts.fill : this.fill;
+        var fillRect = (opts.fillRect != null) ? opts.fillRect : this.fillRect;
+        var closePath = (opts.closePath != null) ? opts.closePath : this.closePath;
+        var offset = (opts.offset != null) ? opts.offset : this.offset;
+        var alpha = (opts.alpha != null) ? opts.alpha : this.alpha;
+        var depth = (opts.depth != null) ? opts.depth : this.depth;
+        var isarc = (opts.isarc != null) ? opts.isarc : this.isarc;
+        var linePattern = (opts.linePattern != null) ? opts.linePattern : this.linePattern;
+        ctx.lineWidth = (opts.lineWidth != null) ? opts.lineWidth : this.lineWidth;
+        ctx.lineJoin = (opts.lineJoin != null) ? opts.lineJoin : this.lineJoin;
+        ctx.lineCap = (opts.lineCap != null) ? opts.lineCap : this.lineCap;
+        ctx.strokeStyle = opts.strokeStyle || this.strokeStyle || 'rgba(0,0,0,'+alpha+')';
+        ctx.fillStyle = opts.fillStyle || this.fillStyle || 'rgba(0,0,0,'+alpha+')';
+
+        let dataStates = [];
+
+        if (!closePath && !fill && Array.isArray(opts.dataStates)) {
+            // only do the incomplete visualization for line charts
+            dataStates = opts.dataStates;
+        }
+
+        for (let j= 0; j < depth; j++) {
+            const ctxPattern = $.jqplot.LinePattern(ctx, linePattern);
+
+            ctx.translate(Math.cos(this.angle*Math.PI/180)*offset, Math.sin(this.angle*Math.PI/180)*offset);
+            ctxPattern.beginPath();
+
+            if (isarc) {
+                ctx.arc(points[0], points[1], points[2], points[3], points[4], true);
+            }
+            else if (fillRect) {
+                ctx.fillRect(points[0], points[1], points[2], points[3]);
+            }
+            else if (points && points.length) {
+                let move = true;
+
+                for (let i = 0; i < points.length; i++) {
+                    // skip to the first non-null point and move to it.
+                    if (points[i][0] === null && points[i][1] === null) {
+                        continue;
+                    }
+
+                    if (move) {
+                        move = false;
+
+                        ctxPattern.moveTo(points[i][0], points[i][1]);
+                        continue;
+                    }
+
+                    // draw shadow line to current point or skip if incomplete data point
+                    if (dataStates[i] && 'complete' !== dataStates[i]) {
+                        ctxPattern.moveTo(points[i][0], points[i][1]);
+                    } else {
+                        ctxPattern.lineTo(points[i][0], points[i][1]);
+                    }
+                }
+            }
+
+            if (closePath) {
+                ctxPattern.closePath();
+            }
+
+            if (fill) {
+                ctx.fill();
+            }
+            else {
+                ctx.stroke();
+            }
+        }
+
+        ctx.restore();
+    };
+})(jQuery);

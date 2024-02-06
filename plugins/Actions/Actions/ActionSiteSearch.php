@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -27,11 +27,7 @@ class ActionSiteSearch extends Action
 {
     private $searchCategory = false;
     private $searchCount = false;
-
-    const CVAR_KEY_SEARCH_CATEGORY = '_pk_scat';
-    const CVAR_KEY_SEARCH_COUNT = '_pk_scount';
-    const CVAR_INDEX_SEARCH_CATEGORY = '4';
-    const CVAR_INDEX_SEARCH_COUNT = '5';
+    protected $originalUrl;
 
     public function __construct(Request $request, $detect = true)
     {
@@ -74,11 +70,6 @@ class ActionSiteSearch extends Action
         return $this->getIdActionName();
     }
 
-    public function getCustomFloatValue()
-    {
-        return $this->request->getPageGenerationTime();
-    }
-
     protected function isSearchDetected()
     {
         $siteSearch = $this->detectSiteSearch($this->originalUrl);
@@ -101,29 +92,25 @@ class ActionSiteSearch extends Action
         return true;
     }
 
-    public function getCustomVariables()
+    public function getSearchCategory()
     {
-        $customVariables = parent::getCustomVariables();
-
-        // Enrich Site Search actions with Custom Variables, overwriting existing values
-        if (!empty($this->searchCategory)) {
-            if (!empty($customVariables['custom_var_k' . self::CVAR_INDEX_SEARCH_CATEGORY])) {
-                Common::printDebug("WARNING: Overwriting existing Custom Variable  in slot " . self::CVAR_INDEX_SEARCH_CATEGORY . " for this page view");
-            }
-            $customVariables['custom_var_k' . self::CVAR_INDEX_SEARCH_CATEGORY] = self::CVAR_KEY_SEARCH_CATEGORY;
-            $customVariables['custom_var_v' . self::CVAR_INDEX_SEARCH_CATEGORY] = Request::truncateCustomVariable($this->searchCategory);
+        $searchCategory = trim($this->searchCategory);
+        if (!empty($searchCategory)) {
+            // Max length of DB field = 200
+            $searchCategory = substr($this->searchCategory, 0, 200);
         }
-        if ($this->searchCount !== false) {
-            if (!empty($customVariables['custom_var_k' . self::CVAR_INDEX_SEARCH_COUNT])) {
-                Common::printDebug("WARNING: Overwriting existing Custom Variable  in slot " . self::CVAR_INDEX_SEARCH_COUNT . " for this page view");
-            }
-            $customVariables['custom_var_k' . self::CVAR_INDEX_SEARCH_COUNT] = self::CVAR_KEY_SEARCH_COUNT;
-            $customVariables['custom_var_v' . self::CVAR_INDEX_SEARCH_COUNT] = (int)$this->searchCount;
-        }
-        return $customVariables;
+        return $searchCategory;
     }
 
-    protected function detectSiteSearchFromUrl($website, $parsedUrl)
+    public function getSearchCount()
+    {
+        if ($this->searchCount !== false) {
+            $this->searchCount = (int)$this->searchCount;
+        }
+        return $this->searchCount;
+    }
+
+    public static function detectSiteSearchFromUrl($website, $parsedUrl, $pageEncoding = null)
     {
         $doRemoveSearchParametersFromUrl = true;
         $separator = '&';
@@ -132,21 +119,33 @@ class ActionSiteSearch extends Action
         $keywordParameters = isset($website['sitesearch_keyword_parameters'])
             ? $website['sitesearch_keyword_parameters']
             : array();
-        $queryString = (!empty($parsedUrl['query']) ? $parsedUrl['query'] : '') . (!empty($parsedUrl['fragment']) ? $separator . $parsedUrl['fragment'] : '');
-        $parametersRaw = UrlHelper::getArrayFromQueryString($queryString);
+        $queryString = !empty($parsedUrl['query']) ? $parsedUrl['query'] : '';
+        $fragment = !empty($parsedUrl['fragment']) ? $parsedUrl['fragment'] : '';
+
+        $parsedFragment = parse_url($fragment);
+
+        // check if fragment contains a separate query (beginning with ?) otherwise assume complete fragment as query
+        if ($fragment && strpos($fragment, '?') !== false && !empty($parsedFragment['query'])) {
+            $fragmentBeforeQuery = !empty($parsedFragment['path']) ? $parsedFragment['path'] : '';
+            $fragmentQuery = $parsedFragment['query'];
+        } else {
+            $fragmentQuery = $fragment;
+            $fragmentBeforeQuery = '';
+        }
+
+        $parametersRaw = UrlHelper::getArrayFromQueryString($queryString . $separator . $fragmentQuery);
 
         // strtolower the parameter names for smooth site search detection
         $parameters = array();
         foreach ($parametersRaw as $k => $v) {
-            $parameters[Common::mb_strtolower($k)] = $v;
+            $parameters[mb_strtolower($k)] = $v;
         }
         // decode values if they were sent from a client using another charset
-        $pageEncoding = $this->request->getParam('cs');
         PageUrl::reencodeParameters($parameters, $pageEncoding);
 
         // Detect Site Search keyword
         foreach ($keywordParameters as $keywordParameterRaw) {
-            $keywordParameter = Common::mb_strtolower($keywordParameterRaw);
+            $keywordParameter = mb_strtolower($keywordParameterRaw);
             if (!empty($parameters[$keywordParameter])) {
                 $actionName = $parameters[$keywordParameter];
                 break;
@@ -162,7 +161,7 @@ class ActionSiteSearch extends Action
             : array();
 
         foreach ($categoryParameters as $categoryParameterRaw) {
-            $categoryParameter = Common::mb_strtolower($categoryParameterRaw);
+            $categoryParameter = mb_strtolower($categoryParameterRaw);
             if (!empty($parameters[$categoryParameter])) {
                 $categoryName = $parameters[$categoryParameter];
                 break;
@@ -170,7 +169,7 @@ class ActionSiteSearch extends Action
         }
 
         if (isset($parameters['search_count'])
-            && $this->isValidSearchCount($parameters['search_count'])
+            && self::isValidSearchCount($parameters['search_count'])
         ) {
             $count = $parameters['search_count'];
         }
@@ -183,7 +182,14 @@ class ActionSiteSearch extends Action
                 $parsedUrl['query'] = UrlHelper::getQueryStringWithExcludedParameters(UrlHelper::getArrayFromQueryString($parsedUrl['query']), $parametersToExclude);
             }
             if (isset($parsedUrl['fragment'])) {
-                $parsedUrl['fragment'] = UrlHelper::getQueryStringWithExcludedParameters(UrlHelper::getArrayFromQueryString($parsedUrl['fragment']), $parametersToExclude);
+                $parsedUrl['fragment'] = UrlHelper::getQueryStringWithExcludedParameters(UrlHelper::getArrayFromQueryString($fragmentQuery), $parametersToExclude);
+                if ($fragmentBeforeQuery) {
+                    if ($parsedUrl['fragment']) {
+                        $parsedUrl['fragment'] = $fragmentBeforeQuery . '?' . $parsedUrl['fragment'];
+                    } else {
+                        $parsedUrl['fragment'] = $fragmentBeforeQuery;
+                    }
+                }
             }
         }
         $url = UrlHelper::getParseUrlReverse($parsedUrl);
@@ -206,7 +212,7 @@ class ActionSiteSearch extends Action
         return array($url, $actionName, $categoryName, $count);
     }
 
-    protected function isValidSearchCount($count)
+    protected static function isValidSearchCount($count)
     {
         return is_numeric($count) && $count >= 0;
     }
@@ -243,7 +249,7 @@ class ActionSiteSearch extends Action
             // Detect Site Search from URL query parameters
             if (!empty($parsedUrl['query']) || !empty($parsedUrl['fragment'])) {
                 // array($url, $actionName, $categoryName, $count);
-                $searchInfo = $this->detectSiteSearchFromUrl($website, $parsedUrl);
+                $searchInfo = $this->detectSiteSearchFromUrl($website, $parsedUrl, $this->request->getParam('cs'));
                 if (!empty($searchInfo)) {
                     list ($url, $actionName, $categoryName, $count) = $searchInfo;
                 }
@@ -276,5 +282,4 @@ class ActionSiteSearch extends Action
             $count
         );
     }
-
 }

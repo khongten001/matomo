@@ -1,6 +1,5 @@
 {
     "SegmentEditor": {
-        "PluginDescription": "बनाएँ और खंड संपादक के साथ कस्टम विज़िटर सेगमेंट का पुन: उपयोग।",
         "AddANDorORCondition": "शर्त %s जोड़ें",
         "AddNewSegment": "नया खंड जोड़ें",
         "AreYouSureDeleteSegment": "क्या आप इस खंड को हटाना चाहते हैं?",
@@ -10,13 +9,14 @@
         "DataAvailableAtLaterDate": "आपका खंडों Analytics रिपोर्ट बाद में उपलब्ध हो जाएगा। असुविधा के लिए हमें खेद है।",
         "DefaultAllVisits": "सभी का दौरा",
         "DragDropCondition": "खींचें और शर्त बताये",
-        "LoadingSegmentedDataMayTakeSomeTime": "खंडों आगंतुक डेटा प्रसंस्करण में कुछ मिनट लग सकते हैं ...",
+        "LoadingSegmentedDataMayTakeSomeTime": "खंडों आगंतुक डेटा प्रसंस्करण में कुछ मिनट लग सकते हैं …",
         "OperatorAND": "और",
         "OperatorOR": "या",
         "SaveAndApply": "सहेजें और लागू करें",
         "SegmentDisplayedAllWebsites": "सभी वेबसाइटों",
         "SegmentDisplayedThisWebsiteOnly": "यह वेबसाइट केवल",
         "SegmentNotApplied": "खंड '%s' को लागू नहीं",
+        "Test": "परीक्षण",
         "ThisSegmentIsVisibleTo": "इस खंड के लिए दिख रहा है:",
         "VisibleToAllUsers": "सभी उपयोगकर्ताओं",
         "VisibleToMe": "मुझे",

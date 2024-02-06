@@ -1,53 +1,69 @@
 /*!
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
  * Site selector screenshot tests.
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 describe("SiteSelector", function () {
-    var selectorToCapture = '[piwik-siteselector],[piwik-siteselector] .dropdown';
-
     this.timeout(0);
 
-    var url = "?module=UsersManager&action=userSettings&idSite=1&period=day&date=yesterday";
+    const selectorToCapture = '.siteSelector,.siteSelector .dropdown';
+    const url = "?module=UsersManager&action=userSettings&idSite=1&period=day&date=yesterday";
 
-    it("should load correctly", function (done) {
-        expect.screenshot("loaded").to.be.captureSelector(selectorToCapture, function (page) {
-            page.load(url);
-        }, done);
+    it("should load correctly", async function() {
+        await page.goto(url);
+        await page.waitForNetworkIdle();
+
+        dialog = await page.$(selectorToCapture);
+        await page.waitForTimeout(500);
+        expect(await dialog.screenshot()).to.matchImage('loaded');
     });
 
-    it("should display expanded when clicked", function (done) {
-        expect.screenshot("expanded").to.be.captureSelector(selectorToCapture, function (page) {
-            page.click('.sites_autocomplete .title');
-        }, done);
+    it("should display expanded when clicked", async function() {
+        await page.click('.sites_autocomplete .title');
+
+        await page.waitForSelector('.custom_select_ul_list');
+        await page.waitForNetworkIdle();
+        await page.click('.websiteSearch');
+
+        expect(await page.screenshotSelector(selectorToCapture)).to.matchImage('expanded');
     });
 
-    it("should show no results when search returns no results", function (done) {
-        expect.screenshot("search_no_results").to.be.captureSelector(selectorToCapture, function (page) {
-            page.sendKeys(".websiteSearch", "abc");
-        }, done);
+    it("should show no results when search returns no results", async function() {
+        await page.type(".websiteSearch", "abc");
+        await page.waitForTimeout(500);
+        await page.waitForNetworkIdle();
+
+        expect(await page.screenshotSelector(selectorToCapture)).to.matchImage('search_no_results');
     });
 
-    it("should search when one character typed into search input", function (done) {
-        expect.screenshot("search_one_char").to.be.captureSelector(selectorToCapture, function (page) {
-            page.click('.reset');
-            page.sendKeys(".websiteSearch", "s");
-        }, done);
+    it("should search when one character typed into search input", async function() {
+        await page.click('.reset');
+        await page.waitForTimeout(500);
+        await page.type(".websiteSearch", "s");
+        await page.waitForNetworkIdle();
+        await page.waitForTimeout(500);
+
+        expect(await page.screenshotSelector(selectorToCapture)).to.matchImage('search_one_char');
     });
 
-    it("should search again when second character typed into search input", function (done) {
-        expect.screenshot("search_two_chars").to.be.captureSelector(selectorToCapture, function (page) {
-            page.sendKeys(".websiteSearch", "st");
-        }, done);
+    it("should search again when second character typed into search input", async function() {
+        await page.type(".websiteSearch", "t");
+        await page.waitForNetworkIdle();
+        await page.waitForTimeout(500);
+
+        expect(await page.screenshotSelector(selectorToCapture)).to.matchImage('search_two_chars');
     });
 
-    it("should change the site when a site is selected", function (done) {
-        expect.screenshot("site_selected").to.be.captureSelector(selectorToCapture, function (page) {
-            page.click(".custom_select_ul_list>li:visible");
-        }, done);
+    it("should change the site when a site is selected", async function() {
+        elem = await page.jQuery(".custom_select_ul_list>li:visible");
+        elem.click();
+        await page.waitForNetworkIdle();
+        await page.waitForTimeout(200);
+
+        expect(await page.screenshotSelector(selectorToCapture)).to.matchImage('site_selected');
     });
 });

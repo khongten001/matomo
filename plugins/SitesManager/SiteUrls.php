@@ -1,15 +1,18 @@
 <?php
+
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
+
 namespace Piwik\Plugins\SitesManager;
 
 use Piwik\Cache;
 use Piwik\Common;
+use Piwik\Tracker\Request;
 
 class SiteUrls
 {
@@ -43,43 +46,57 @@ class SiteUrls
     public function groupUrlsByHost($siteUrls)
     {
         if (empty($siteUrls)) {
-            return array();
+            return [];
         }
 
-        $allUrls = array();
+        $allUrls = [];
 
         foreach ($siteUrls as $idSite => $urls) {
             $idSite = (int) $idSite;
             foreach ($urls as $url) {
-                $urlParsed = @parse_url($url);
-
-                if ($urlParsed === false || !isset($urlParsed['host'])) {
-                    continue;
-                }
-
-                $host = $this->toCanonicalHost($urlParsed['host']);
-                $path = $this->getCanonicalPathFromParsedUrl($urlParsed);
-
-                if (!isset($allUrls[$host])) {
-                    $allUrls[$host] = array();
-                }
-
-                if (!isset($allUrls[$host][$path])) {
-                    $allUrls[$host][$path] = array();
-                }
-
-                if (!in_array($idSite, $allUrls[$host][$path])) {
-                    $allUrls[$host][$path][] = $idSite;
-                }
+                $this->addUrlByHost($allUrls, $idSite, $url);
             }
         }
 
-        foreach ($allUrls as $host => $paths) {
-            uksort($paths, array($this, 'sortByPathDepth'));
-            $allUrls[$host] = $paths;
-        }
+        $this->sortUrlsByHost($allUrls);
 
         return $allUrls;
+    }
+
+    public function addUrlByHost(&$allUrls, $idSite, $url, $addPath = true)
+    {
+        $urlParsed = @parse_url($url);
+
+        if ($urlParsed === false || !isset($urlParsed['host'])) {
+            return;
+        }
+
+        $host = $this->toCanonicalHost($urlParsed['host']);
+        $path = $this->getCanonicalPathFromParsedUrl($urlParsed);
+
+        if (!isset($allUrls[$host])) {
+            $allUrls[$host] = [];
+        }
+
+        if (!$addPath) {
+            $path = '/';
+        }
+
+        if (!isset($allUrls[$host][$path])) {
+            $allUrls[$host][$path] = [];
+        }
+
+        if (!in_array($idSite, $allUrls[$host][$path])) {
+            $allUrls[$host][$path][] = $idSite;
+        }
+    }
+
+    private function sortUrlsByHost(&$allUrls)
+    {
+        foreach ($allUrls as $host => $paths) {
+            uksort($paths, [$this, 'sortByPathDepth']);
+            $allUrls[$host] = $paths;
+        }
     }
 
     public function getIdSitesMatchingUrl($parsedUrl, $urlsGroupedByHost)
@@ -91,23 +108,38 @@ class SiteUrls
         $urlHost = $this->toCanonicalHost($parsedUrl['host']);
         $urlPath = $this->getCanonicalPathFromParsedUrl($parsedUrl);
 
-        $matchingSites = null;
-        if (isset($urlsGroupedByHost[$urlHost])) {
-            $paths = $urlsGroupedByHost[$urlHost];
+        // As wildcard subdomain might be allowed, for e.g. my.sub.example.org we need to check e.g.
+        // - my.sub.example.org
+        // - .my.sub.example.org
+        // - .sub.example.org
+        // - .example.org
+        $hostsToCheck = [
+            $urlHost,
+            '.' . $urlHost,
+        ];
 
-            foreach ($paths as $path => $idSites) {
-                if (0 === strpos($urlPath, $path)) {
-                    $matchingSites = $idSites;
-                    break;
+        while (substr_count($urlHost, '.') >= 2) {
+            $urlHost = substr($urlHost, strpos($urlHost, '.') + 1);
+            $hostsToCheck[] = '.' . $urlHost;
+        }
+
+        foreach ($hostsToCheck as $host) {
+            if (isset($urlsGroupedByHost[$host])) {
+                $paths = $urlsGroupedByHost[$host];
+
+                foreach ($paths as $path => $idSites) {
+                    if (0 === strpos($urlPath, $path)) {
+                        return $idSites;
+                    }
                 }
-            }
 
-            if (!isset($matchingSites) && isset($paths['/'])) {
-                $matchingSites = $paths['/'];
+                if (isset($paths['/'])) {
+                    return $paths['/'];
+                }
             }
         }
 
-        return $matchingSites;
+        return null;
     }
 
     public function getPathMatchingUrl($parsedUrl, $urlsGroupedByHost)
@@ -119,7 +151,6 @@ class SiteUrls
         $urlHost = $this->toCanonicalHost($parsedUrl['host']);
         $urlPath = $this->getCanonicalPathFromParsedUrl($parsedUrl);
 
-        $matchingSites = null;
         if (isset($urlsGroupedByHost[$urlHost])) {
             $paths = $urlsGroupedByHost[$urlHost];
 
@@ -150,15 +181,15 @@ class SiteUrls
         $siteUrls = $model->getAllKnownUrlsForAllSites();
 
         if (empty($siteUrls)) {
-            return array();
+            return [];
         }
 
-        $urls = array();
+        $urls = [];
         foreach ($siteUrls as $siteUrl) {
             $siteId = (int) $siteUrl['idsite'];
 
             if (!isset($urls[$siteId])) {
-                $urls[$siteId] = array();
+                $urls[$siteId] = [];
             }
 
             $urls[$siteId][] = $siteUrl['url'];
@@ -170,6 +201,14 @@ class SiteUrls
     private static function getCache()
     {
         return Cache::getLazyCache();
+    }
+
+    public function addRequestUrlToSiteUrls(&$allUrls, Request $request)
+    {
+        $idSite = $request->getIdSite();
+        $url = $request->getParam('url');
+
+        $this->addUrlByHost($allUrls, $idSite, $url, $addPath = false);
     }
 
     private function sortByPathDepth($pathA, $pathB)
@@ -187,7 +226,7 @@ class SiteUrls
 
     private function toCanonicalHost($host)
     {
-        $host = Common::mb_strtolower($host);
+        $host = mb_strtolower($host);
         if (strpos($host, 'www.') === 0) {
             $host = substr($host, 4);
         }
@@ -200,7 +239,7 @@ class SiteUrls
         $path = '/';
 
         if (isset($urlParsed['path'])) {
-            $path = Common::mb_strtolower($urlParsed['path']);
+            $path = mb_strtolower($urlParsed['path']);
             if (!Common::stringEndsWith($path, '/')) {
                 $path .= '/';
             }
@@ -208,5 +247,4 @@ class SiteUrls
 
         return $path;
     }
-
 }

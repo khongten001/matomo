@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -15,6 +15,8 @@ use Piwik\Filesystem;
 use Piwik\Piwik;
 use Piwik\Plugin\Manager as PluginManager;
 use Piwik\Plugin\Dependency as PluginDependency;
+use Piwik\Plugin\Manager;
+use Piwik\Plugins\Marketplace\Environment;
 use Piwik\Plugins\Marketplace\Marketplace;
 use Piwik\Unzip;
 use Piwik\Plugins\Marketplace\Api\Client;
@@ -25,7 +27,6 @@ use Piwik\Plugins\Marketplace\Api\Client;
 class PluginInstaller
 {
     const PATH_TO_DOWNLOAD = '/latest/plugins/';
-    const PATH_TO_EXTRACT = '/plugins/';
 
     private $pluginName;
 
@@ -76,7 +77,6 @@ class PluginInstaller
                     $plugin->reloadPluginInformation();
                 }
             }
-
         } catch (\Exception $e) {
 
             if (!empty($tmpPluginZip)) {
@@ -112,7 +112,6 @@ class PluginInstaller
             $this->copyPluginToDestination($tmpPluginFolder);
 
             Filesystem::deleteAllCacheOnUpdate($this->pluginName);
-
         } catch (\Exception $e) {
 
             $this->removeFileIfExists($pathToZip);
@@ -129,10 +128,13 @@ class PluginInstaller
 
     private function makeSureFoldersAreWritable()
     {
-        Filechecks::dieIfDirectoriesNotWritable(array(
+        $dirs = array(
             StaticContainer::get('path.tmp') . self::PATH_TO_DOWNLOAD,
-            self::PATH_TO_EXTRACT
-        ));
+            Manager::getPluginsDirectory()
+        );
+        // we do not require additional plugin directories to be writeable ({@link Manager::getPluginsDirectories()})
+        // as we only upload to core plugins directory anyway
+        Filechecks::dieIfDirectoriesNotWritable($dirs);
     }
 
     /**
@@ -148,7 +150,6 @@ class PluginInstaller
             try {
                 $downloadUrl = $this->marketplaceClient->getDownloadUrl($this->pluginName);
                 $errorMessage = sprintf('Failed to download plugin from %s: %s', $downloadUrl, $e->getMessage());
-
             } catch (\Exception $ex) {
                 $errorMessage = sprintf('Failed to download plugin: %s', $e->getMessage());
             }
@@ -194,7 +195,7 @@ class PluginInstaller
         }
 
         $dependency = new PluginDependency();
-        $dependency->setEnvironment($this->marketplaceClient->getEnvironment());
+        $dependency->setEnvironment($this->getEnvironment());
         $missingDependencies = $dependency->getMissingDependencies($requires);
 
         if (!empty($missingDependencies)) {
@@ -207,7 +208,6 @@ class PluginInstaller
                     $params   = array(ucfirst($dep['requirement']), $dep['actualVersion'], $dep['requiredVersion']);
                     $message .= Piwik::translate('CorePluginsAdmin_MissingRequirementsNotice', $params);
                 }
-
             }
 
             throw new PluginInstallerException($message);
@@ -294,11 +294,16 @@ class PluginInstaller
 
     private function copyPluginToDestination($tmpPluginFolder)
     {
-        $pluginTargetPath = PIWIK_USER_PATH . self::PATH_TO_EXTRACT . $this->pluginName;
+        $pluginsDir = Manager::getPluginsDirectory();
+
+        if (!empty($GLOBALS['MATOMO_PLUGIN_COPY_DIR'])) {
+            $pluginsDir = $GLOBALS['MATOMO_PLUGIN_COPY_DIR'];
+        }
+        $pluginTargetPath = $pluginsDir . $this->pluginName;
 
         $this->removeFolderIfExists($pluginTargetPath);
 
-        Filesystem::copyRecursive($tmpPluginFolder, PIWIK_USER_PATH . self::PATH_TO_EXTRACT);
+        Filesystem::copyRecursive($tmpPluginFolder, $pluginsDir);
     }
 
     /**
@@ -340,4 +345,12 @@ class PluginInstaller
         }
     }
 
+    private function getEnvironment()
+    {
+        if ($this->marketplaceClient) {
+            return $this->marketplaceClient->getEnvironment();
+        } else {
+            return StaticContainer::get(Environment::class);
+        }
+    }
 }

@@ -1,17 +1,15 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Integration\Tracker;
 
-use Piwik\Cache;
 use Piwik\Container\StaticContainer;
 use Piwik\Date;
-use Piwik\Network\IPUtils;
 use Piwik\Plugin\Manager;
 use Piwik\Plugins\SitesManager\API;
 use Piwik\Tests\Framework\Fixture;
@@ -27,17 +25,20 @@ use Piwik\Tests\Framework\TestCase\IntegrationTestCase;
  */
 class VisitTest extends IntegrationTestCase
 {
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
 
         // setup the access layer
         FakeAccess::$superUser = true;
 
+        Fixture::createSuperUser(true);
         Manager::getInstance()->loadTrackerPlugins();
         $pluginNames = array_keys(Manager::getInstance()->getLoadedPlugins());
         $pluginNames[] = 'SitesManager';
         $pluginNames[] = 'WebsiteMeasurable';
+        $pluginNames[] = 'TagManager';// needed because we create a site in Tracker mode...
+        $pluginNames[] = 'API'; // needed because we create a site in Tracker mode...
         Manager::getInstance()->loadPlugins($pluginNames);
         Visit::$dimensions = null;
     }
@@ -84,6 +85,14 @@ class VisitTest extends IntegrationTestCase
         );
     }
 
+    public function test_worksWhenSiteDoesNotExist()
+    {
+        $request = new RequestAuthenticated(array('idsite' => 99999999, 'rec' => 1));
+
+        $excluded = new VisitExcluded($request);
+        $this->assertSame(false, $excluded->isExcluded());
+    }
+
     /**
      * @dataProvider getExcludedIpTestData
      */
@@ -98,7 +107,7 @@ class VisitTest extends IntegrationTestCase
         foreach ($tests as $ip => $expected) {
             $request->setParam('cip', $ip);
 
-            $excluded = new VisitExcluded_public($request);
+            $excluded = new VisitExcludedPublic($request);
             $this->assertSame($expected, $excluded->public_isVisitorIpExcluded($ip));
         }
     }
@@ -184,7 +193,7 @@ class VisitTest extends IntegrationTestCase
         $request = new RequestAuthenticated(array('idsite' => $idsite, 'cip' => $ip));
 
         $_SERVER['HTTP_VIA'] = '1.1 Chrome-Compression-Proxy';
-        $excluded = new VisitExcluded_public($request);
+        $excluded = new VisitExcludedPublic($request);
         $isBot = $excluded->public_isNonHumanBot();
         unset($_SERVER['HTTP_VIA']);
         $this->assertSame($isNonHumanBot, $isBot);
@@ -223,6 +232,25 @@ class VisitTest extends IntegrationTestCase
                 '12&^%345'       => true,
                 'sfasdf'         => false,
             )),
+            array( '/bot|spider|crawl|scanner/i', array( // case insensitive regex
+                'Mozilla/5.0 (compatible; SISTRIX Crawler; http://crawler.sistrix.net/)' => true,
+                'Googlebot/2.1 (+http://www.google.com/bot.html)' => true,
+                'Mozilla/5.0 (compatible; adscanner/)' => true,
+                'Baiduspider+(+http://www.baidu.com/search/spider.htm)' => true,
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/79.0.3945.88 Safari/537.36' => false,
+                'Mozilla/5.0 (Windows NT 6.1; Trident/7.0; rv:11.0) like Gecko' => false,
+            )),
+            array('/google|yahoo/', array( // case sensitive regex
+                'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)' => true,
+                'Mozilla/5.0 (compatible; Yahoo! Slurp/3.0; http://help.yahoo.com/help/us/ysearch/slurp)' => true,
+                'Googlebot-Image/1.0' => false,
+                'Yahoo! Slurp China' => false,
+            )),
+            array('/Mozilla/5.0/i)', array( // invalid regex
+                'Mozilla/5.0 (compatible; Yahoo! Slurp/3.0; http://help.yahoo.com/help/us/ysearch/slurp)' => false,
+                'Wget/1.13.4 (linux-gnu)' => false,
+                'Mozilla/5.0 (compatible; AhrefsBot/7.0; +http://ahrefs.com/robot/)' => false,
+            ))
         );
     }
 
@@ -231,8 +259,6 @@ class VisitTest extends IntegrationTestCase
      */
     public function testIsVisitorUserAgentExcluded($excludedUserAgent, $tests)
     {
-        API::getInstance()->setSiteSpecificUserAgentExcludeEnabled(true);
-
         $idsite = API::getInstance()->addSite("name", "http://piwik.net/", $ecommerce = 0,
             $siteSearch = 1, $searchKeywordParameters = null, $searchCategoryParameters = null, $excludedIp = null,
             $excludedQueryParameters = null, $timezone = null, $currency = null, $group = null, $startDate = null,
@@ -243,7 +269,7 @@ class VisitTest extends IntegrationTestCase
         // test that user agents that contain excluded user agent strings are excluded
         foreach ($tests as $ua => $expected) {
             $request->setParam('ua', $ua);
-            $excluded = new VisitExcluded_public($request);
+            $excluded = new VisitExcludedPublic($request);
 
             $this->assertSame($expected, $excluded->public_isUserAgentExcluded(), "Result if isUserAgentExcluded('$ua') was not " . ($expected ? 'true' : 'false') . ".");
         }
@@ -266,7 +292,6 @@ class VisitTest extends IntegrationTestCase
             'http://valid.domain/page' => false,
             'https://valid.domain/page' => false,
         );
-        API::getInstance()->setSiteSpecificUserAgentExcludeEnabled(true);
 
         $idsite = API::getInstance()->addSite("name", "http://piwik.net/");
 
@@ -277,7 +302,7 @@ class VisitTest extends IntegrationTestCase
                 'idsite' => $idsite,
                 'urlref' => $spamUrl
             ));
-            $excluded = new VisitExcluded_public($request);
+            $excluded = new VisitExcludedPublic($request);
 
             $this->assertSame($expectedIsReferrerSpam, $excluded->public_isReferrerSpamExcluded(), $spamUrl);
         }
@@ -314,7 +339,7 @@ class VisitTest extends IntegrationTestCase
 
         foreach ($isIpBot as $ip => $isBot) {
             $request->setParam('cip', $ip);
-            $excluded = new VisitExcluded_public($request);
+            $excluded = new VisitExcludedPublic($request);
 
             $this->assertSame($isBot, $excluded->public_isNonHumanBot(), $ip);
         }
@@ -350,7 +375,7 @@ class VisitTest extends IntegrationTestCase
             'Googlebot' => true,
 
             'random' => false,
-            'hello world' => false,
+//            'hello world' => false,
             'this is a user agent' => false,
             'Mozilla' => false,
         );
@@ -364,7 +389,7 @@ class VisitTest extends IntegrationTestCase
                 'ua' => $userAgent,
             ));
 
-            $excluded = new VisitExcluded_public($request);
+            $excluded = new VisitExcludedPublic($request);
 
             $this->assertSame($isBot, $excluded->public_isNonHumanBot(), $userAgent);
         }
@@ -404,11 +429,12 @@ class VisitTest extends IntegrationTestCase
 
     public function test_markArchivedReportsAsInvalidIfArchiveAlreadyFinished_shouldConsiderWebsitesTimezone()
     {
-        $timezone1 = 'UTC+4';
-        $timezone2 = 'UTC+6';
+        // The double-handling below is needed to work around weird behaviour when UTC and UTC+5 are different dates
+        // Example: 4:32am on 1 April in UTC+5 is 11:32pm on 31 March in UTC
+        $midnight = Date::factoryInTimezone('today', 'UTC+5')->setTimezone('UTC+5');
 
-        $currentActionTime1 = Date::today()->setTimezone($timezone1)->getDatetime();
-        $currentActionTime2 = Date::today()->setTimezone($timezone2)->getDatetime();
+        $oneHourAfterMidnight = $midnight->addHour(1)->getDatetime();
+        $oneHourBeforeMidnight = $midnight->subHour(1)->getDatetime();
         $idsite = API::getInstance()->addSite('name', 'http://piwik.net/', $ecommerce = null,
             $siteSearch = null,
             $searchKeywordParameters = null,
@@ -418,18 +444,18 @@ class VisitTest extends IntegrationTestCase
             $timezone = 'UTC+5');
 
         $expectedRemembered = array(
-            substr($currentActionTime1, 0, 10) => array($idsite)
+            substr($oneHourAfterMidnight, 0, 10) => array($idsite),
         );
 
         // if website timezone was von considered both would be today (expected = array())
-        $this->assertRememberedArchivedReportsThatShouldBeInvalidated($idsite, $currentActionTime1, array());
-        $this->assertRememberedArchivedReportsThatShouldBeInvalidated($idsite, $currentActionTime2, $expectedRemembered);
+        $this->assertRememberedArchivedReportsThatShouldBeInvalidated($idsite, $oneHourAfterMidnight, array());
+        $this->assertRememberedArchivedReportsThatShouldBeInvalidated($idsite, $oneHourBeforeMidnight, $expectedRemembered);
     }
 
     private function assertRememberedArchivedReportsThatShouldBeInvalidated($idsite, $requestDate, $expectedRemeberedArchivedReports)
     {
         /** @var Visit $visit */
-        list($visit) = $this->prepareVisitWithRequest(array(
+        [$visit] = $this->prepareVisitWithRequest(array(
             'idsite' => $idsite,
             'rec' => 1,
             'cip' => '156.146.156.146',
@@ -441,7 +467,22 @@ class VisitTest extends IntegrationTestCase
         $archive = StaticContainer::get('Piwik\Archive\ArchiveInvalidator');
         $remembered = $archive->getRememberedArchivedReportsThatShouldBeInvalidated();
 
-        $this->assertSame($expectedRemeberedArchivedReports, $remembered);
+        $this->assertSameReportsInvalidated($expectedRemeberedArchivedReports, $remembered);
+    }
+
+    private function assertSameReportsInvalidated($expected, $actual)
+    {
+        $keys1 = array_keys($expected);
+        $keys2 = array_keys($actual);
+        sort($keys1);
+        sort($keys2);
+
+        $this->assertSame($keys1, $keys2);
+        foreach ($expected as $index => $values) {
+            sort($values);
+            sort($actual[$index]);
+            $this->assertSame($values, $actual[$index]);
+        }
     }
 
     private function prepareVisitWithRequest($requestParams, $requestDate)
@@ -465,7 +506,7 @@ class VisitTest extends IntegrationTestCase
     }
 }
 
-class VisitExcluded_public extends VisitExcluded
+class VisitExcludedPublic extends VisitExcluded
 {
     public function public_isVisitorIpExcluded($ip)
     {

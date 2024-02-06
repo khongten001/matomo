@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
@@ -10,15 +10,12 @@ namespace Piwik\Plugins\TestRunner\Commands;
 
 use Piwik\Application\Environment;
 use Piwik\Config;
+use Piwik\Db;
 use Piwik\Plugin\ConsoleCommand;
 use Piwik\Tests\Framework\TestingEnvironmentManipulator;
 use Piwik\Tests\Framework\TestingEnvironmentVariables;
 use Piwik\Url;
 use Piwik\Tests\Framework\Fixture;
-use Symfony\Component\Console\Input\InputArgument;
-use Symfony\Component\Console\Input\InputInterface;
-use Symfony\Component\Console\Input\InputOption;
-use Symfony\Component\Console\Output\OutputInterface;
 
 /**
  * Console commands that sets up a fixture either in a local MySQL database or a remote one.
@@ -52,47 +49,54 @@ class TestsSetupFixture extends ConsoleCommand
         $this->setName('tests:setup-fixture');
         $this->setDescription('Create a database and fill it with data using a Piwik test fixture.');
 
-        $this->addArgument('fixture', InputArgument::REQUIRED,
+        $this->addRequiredArgument('fixture',
             "The class name of the fixture to apply. Doesn't need to have a namespace if it exists in the " .
             "Piwik\\Tests\\Fixtures namespace.");
 
-        $this->addOption('db-name', null, InputOption::VALUE_REQUIRED,
+        $this->addRequiredValueOption('db-name', null,
             "The name of the database that will contain the fixture data. This option is required to be set.");
-        $this->addOption('file', null, InputOption::VALUE_REQUIRED,
+        $this->addRequiredValueOption('file', null,
             "The file location of the fixture. If this option is included the file will be required explicitly.");
-        $this->addOption('db-host', null, InputOption::VALUE_REQUIRED,
+        $this->addRequiredValueOption('db-host', null,
             "The hostname of the MySQL database to use. Uses the default config value if not specified.");
-        $this->addOption('db-user', null, InputOption::VALUE_REQUIRED,
+        $this->addRequiredValueOption('db-user', null,
             "The name of the MySQL user to use. Uses the default config value if not specified.");
-        $this->addOption('db-pass', null, InputOption::VALUE_REQUIRED,
+        $this->addRequiredValueOption('db-pass', null,
             "The MySQL user password to use. Uses the default config value if not specified.");
-        $this->addOption('teardown', null, InputOption::VALUE_NONE,
+        $this->addNoValueOption('teardown', null,
             "If specified, the fixture will be torn down and the database deleted. Won't work if the --db-name " .
             "option isn't supplied.");
-        $this->addOption('persist-fixture-data', null, InputOption::VALUE_NONE,
+        $this->addNoValueOption('persist-fixture-data', null,
             "If specified, the database will not be dropped after the fixture is setup. If the database already " .
             "and the fixture was successfully setup before, nothing will happen.");
-        $this->addOption('drop', null, InputOption::VALUE_NONE,
+        $this->addNoValueOption('drop', null,
             "Forces the database to be dropped before setting up the fixture. Should be used in conjunction with" .
             " --persist-fixture-data when updating a pre-existing test database.");
-        $this->addOption('sqldump', null, InputOption::VALUE_REQUIRED,
+        $this->addRequiredValueOption('sqldump', null,
             "Creates an SQL dump after setting up the fixture and outputs the dump to the file specified by this option.");
-        $this->addOption('save-config', null, InputOption::VALUE_NONE,
+        $this->addNoValueOption('save-config', null,
             "Saves the current configuration file as a config for a new Piwik domain. For example save-config --matomo-domain=mytest.localhost.com will create "
           . "a mytest.config.ini.php file in the config/ directory. Using /etc/hosts you can redirect to 127.0.0.1 and use the saved "
           . "config.");
-        $this->addOption('set-phantomjs-symlinks', null, InputOption::VALUE_NONE,
+        $this->addNoValueOption('set-symlinks', null,
             "Used by UI tests. Creates symlinks to root directory in tests/PHPUnit/proxy.");
-        $this->addOption('server-global', null, InputOption::VALUE_REQUIRED,
+        $this->addRequiredValueOption('server-global', null,
             "Used by UI tests. Sets the \$_SERVER global variable from a JSON string.");
-        $this->addOption('plugins', null, InputOption::VALUE_REQUIRED,
+        $this->addRequiredValueOption('plugins', null,
             "Used by UI tests. Comma separated list of plugin names to activate and install when setting up a fixture.");
+        $this->addNoValueOption('enable-logging', null, 'If enabled, tests will log to the configured log file.');
     }
 
-    protected function execute(InputInterface $input, OutputInterface $output)
+    protected function doExecute(): int
     {
+        $input = $this->getInput();
+        $output = $this->getOutput();
         if (!defined('PIWIK_TEST_MODE')) {
             define('PIWIK_TEST_MODE', true);
+        }
+
+        if ($input->getOption('enable-logging')) {
+            putenv("MATOMO_TESTS_ENABLE_LOGGING=1");
         }
 
         Environment::setGlobalEnvironmentManipulator(new TestingEnvironmentManipulator(new TestingEnvironmentVariables()));
@@ -102,13 +106,17 @@ class TestsSetupFixture extends ConsoleCommand
             $_SERVER = json_decode($serverGlobal, true);
         }
 
+        // Tear down any DB that already exists
+        Db::destroyDatabaseObject();
+
         if(Config::getInstance()->database_tests['tables_prefix'] !== '') {
             throw new \Exception("To generate OmniFixture for the UI tests, you must set an empty tables_prefix in [database_tests]");
         }
-        $this->requireFixtureFiles($input);
+
+        $this->requireFixtureFiles();
         $this->setIncludePathAsInTestBootstrap();
 
-        $host = Url::getHost();
+        $host = Config::getHostname();
         if (empty($host)) {
             $host = 'localhost';
             Url::setHost('localhost');
@@ -123,13 +131,13 @@ class TestsSetupFixture extends ConsoleCommand
             }
         }
 
-        if ($input->getOption('set-phantomjs-symlinks')) {
+        if ($input->getOption('set-symlinks')) {
             $this->createSymbolicLinksForUITests();
         }
 
-        $fixture = $this->createFixture($input, $allowSave = !empty($configDomainToSave));
+        $fixture = $this->createFixture($allowSave = !empty($configDomainToSave));
 
-        $this->setupDatabaseOverrides($input, $fixture);
+        $this->setupDatabaseOverrides($fixture);
 
         // perform setup and/or teardown
         if ($input->getOption('teardown')) {
@@ -139,22 +147,24 @@ class TestsSetupFixture extends ConsoleCommand
             $fixture->performSetUp();
         }
 
-        $this->writeSuccessMessage($output, array("Fixture successfully setup!"));
+        $this->writeSuccessMessage(array("Fixture successfully setup!"));
 
         $sqlDumpPath = $input->getOption('sqldump');
         if ($sqlDumpPath) {
-            $this->createSqlDump($sqlDumpPath, $output);
+            $this->createSqlDump($sqlDumpPath);
         }
 
         if (!empty($configDomainToSave)) {
             Config::getInstance()->forceSave();
         }
+
+        return self::SUCCESS;
     }
 
     private function createSymbolicLinksForUITests()
     {
         // make sure symbolic links exist (phantomjs doesn't support symlink-ing yet)
-        foreach (array('libs', 'plugins', 'tests', 'misc', 'piwik.js') as $linkName) {
+        foreach (array('libs', 'plugins', 'tests', 'misc', 'node_modules', 'piwik.js', 'matomo.js') as $linkName) {
             $linkPath = PIWIK_INCLUDE_PATH . '/tests/PHPUnit/proxy/' . $linkName;
             if (!file_exists($linkPath)) {
                 $target = PIWIK_INCLUDE_PATH . '/' . $linkName;
@@ -169,8 +179,9 @@ class TestsSetupFixture extends ConsoleCommand
         }
     }
 
-    private function createSqlDump($sqlDumpPath, OutputInterface $output)
+    private function createSqlDump($sqlDumpPath)
     {
+        $output = $this->getOutput();
         $output->writeln("<info>Creating SQL dump...</info>");
 
         $databaseConfig = Config::getInstance()->database;
@@ -183,11 +194,12 @@ class TestsSetupFixture extends ConsoleCommand
         $output->writeln("<info>Executing $command...</info>");
         passthru($command);
 
-        $this->writeSuccessMessage($output, array("SQL dump created!"));
+        $this->writeSuccessMessage(array("SQL dump created!"));
     }
 
-    private function setupDatabaseOverrides(InputInterface $input, Fixture $fixture)
+    private function setupDatabaseOverrides(Fixture $fixture)
     {
+        $input = $this->getInput();
         $testingEnvironment = $fixture->getTestEnvironment();
 
         $optionsToOverride = array(
@@ -205,8 +217,9 @@ class TestsSetupFixture extends ConsoleCommand
         }
     }
 
-    private function createFixture(InputInterface $input, $allowSave)
+    private function createFixture($allowSave)
     {
+        $input = $this->getInput();
         $fixtureClass = $input->getArgument('fixture');
         if (class_exists("Piwik\\Tests\\Fixtures\\" . $fixtureClass)) {
             $fixtureClass = "Piwik\\Tests\\Fixtures\\" . $fixtureClass;
@@ -235,7 +248,8 @@ class TestsSetupFixture extends ConsoleCommand
 
         $extraPluginsToLoad = $input->getOption('plugins');
         if ($extraPluginsToLoad) {
-            $fixture->extraPluginsToLoad = explode(',', $extraPluginsToLoad);
+            $fixture->extraPluginsToLoad = array_merge($fixture->extraPluginsToLoad, explode(',', $extraPluginsToLoad));
+            $fixture->extraPluginsToLoad = array_unique($fixture->extraPluginsToLoad);
         }
 
         $fixture->extraDiEnvironments = array('ui-test');
@@ -243,11 +257,9 @@ class TestsSetupFixture extends ConsoleCommand
         return $fixture;
     }
 
-    private function requireFixtureFiles(InputInterface $input)
+    private function requireFixtureFiles()
     {
-        require_once PIWIK_INCLUDE_PATH . '/libs/PiwikTracker/PiwikTracker.php';
-
-        $file = $input->getOption('file');
+        $file = $this->getInput()->getOption('file');
         if ($file) {
             if (is_file($file)) {
                 require_once $file;

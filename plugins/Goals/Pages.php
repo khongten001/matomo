@@ -1,15 +1,13 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\Goals;
 
-use Piwik\Cache;
-use Piwik\Common;
 use Piwik\Piwik;
 use Piwik\Plugins\CoreVisualizations\Visualizations\JqplotGraph\Evolution;
 use Piwik\Plugins\CoreVisualizations\Visualizations\Sparklines;
@@ -55,23 +53,18 @@ class Pages
         $config->setSubcategoryId($subcategory);
         $config->setName('');
         $config->setOrder(15);
+        $config->setModule('Goals');
+        $config->setAction('getMetrics');
         $config->setIsNotWidgetizable();
         $widgets[] = $config;
 
-        foreach ($goals as $goal) {
-            $name = Common::sanitizeInputValue($goal['name']);
-            $goalTranslated = Piwik::translate('Goals_GoalX', array($name));
-
-            $config = $this->factory->createWidget();
-            $config->setName($goalTranslated);
-            $config->setSubcategoryId($subcategory);
-            $config->forceViewDataTable(Sparklines::ID);
-            $config->setParameters(array('idGoal' => $goal['idgoal']));
-            $config->setOrder(25);
-            $config->setIsNotWidgetizable();
-            $config->addParameters(array('allow_multiple' => (int) $goal['allow_multiple'], 'only_summary' => '1'));
-            $widgets[] = $config;
-        }
+        // load sparkline
+        $config = $this->factory->createCustomWidget('getSparklines');
+        $config->setSubcategoryId($subcategory);
+        $config->setName('');
+        $config->setOrder(25);
+        $config->setIsNotWidgetizable();
+        $widgets[] = $config;
 
         $container = $this->createWidgetizableWidgetContainer('GoalsOverview', $subcategory, $widgets);
 
@@ -156,7 +149,9 @@ class Pages
         $config->setParameters(array('idGoal' => Piwik::LABEL_ID_GOAL_IS_ECOMMERCE_ORDER));
         $config->setOrder(5);
         $config->setIsNotWidgetizable();
-        $this->buildGoalByDimensionView(Piwik::LABEL_ID_GOAL_IS_ECOMMERCE_ORDER, $config);
+
+        $extraParameters = [ 'segmented_visitor_log_segment_suffix' => 'visitEcommerceStatus==ordered' ];
+        $this->buildGoalByDimensionView(Piwik::LABEL_ID_GOAL_IS_ECOMMERCE_ORDER, $config, $extraParameters);
 
         return array($config);
     }
@@ -170,7 +165,7 @@ class Pages
         $widgets = array();
 
         $idGoal = (int) $goal['idgoal'];
-        $name   = Common::sanitizeInputValue($goal['name']);
+        $name   = $goal['name'];
         $params = array('idGoal' => $idGoal);
 
         $config = $this->factory->createWidget();
@@ -253,7 +248,7 @@ class Pages
         return $config;
     }
 
-    private function buildGoalByDimensionView($idGoal, WidgetContainerConfig $container)
+    private function buildGoalByDimensionView($idGoal, WidgetContainerConfig $container, $extraParameters = [])
     {
         $container->setLayout('ByDimension');
         $ecommerce = ($idGoal == Piwik::LABEL_ID_GOAL_IS_ECOMMERCE_ORDER);
@@ -280,6 +275,7 @@ class Pages
             }
 
             foreach ($reports as $report) {
+
                 $order++;
 
                 if (empty($report['viewDataTable'])
@@ -295,10 +291,14 @@ class Pages
                 }
 
                 $widget = $this->createWidgetForReport($report['module'], $report['action']);
+                if (!$widget) {
+                    continue;
+                }
                 if (!empty($report['name'])) {
                     $widget->setName($report['name']);
                 }
                 $widget->setParameters($params);
+                $widget->addParameters($extraParameters);
                 $widget->setCategoryId($categoryText);
                 $widget->setSubcategoryId($categoryText);
                 $widget->setOrder($order);
@@ -324,6 +324,7 @@ class Pages
         if (is_null($order)) {
             $order = array(
                 'Referrers_Referrers',
+                'General_Actions',
                 'General_Visit',
                 'General_Visitors',
                 'VisitsSummary_VisitsSummary',
@@ -342,8 +343,9 @@ class Pages
     private function createWidgetForReport($module, $action)
     {
         $report = ReportsProvider::factory($module, $action);
-        $factory = new ReportWidgetFactory($report);
-        return $factory->createWidget();
+        if ($report) {
+            $factory = new ReportWidgetFactory($report);
+            return $factory->createWidget();
+        }
     }
-
 }

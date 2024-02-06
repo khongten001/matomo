@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -25,7 +25,9 @@ class VisitorDetails extends VisitorDetailsAbstract
         $visitor['visitEcommerceStatus']        = $this->getVisitEcommerceStatus();
         $visitor['visitEcommerceStatusIcon']    = $this->getVisitEcommerceStatusIcon();
         $visitor['daysSinceFirstVisit']         = $this->getDaysSinceFirstVisit();
+        $visitor['secondsSinceFirstVisit']      = $this->getSecondsSinceFirstVisit();
         $visitor['daysSinceLastEcommerceOrder'] = $this->getDaysSinceLastEcommerceOrder();
+        $visitor['secondsSinceLastEcommerceOrder'] = $this->getSecondsSinceLastEcommerceOrder();
         $visitor['visitDuration']               = $this->getVisitLength();
         $visitor['visitDurationPretty']         = $this->getVisitLengthPretty();
     }
@@ -35,9 +37,9 @@ class VisitorDetails extends VisitorDetailsAbstract
         $status = $this->getVisitEcommerceStatus();
 
         if (in_array($status, array('ordered', 'orderedThenAbandonedCart'))) {
-            return "plugins/Morpheus/images/ecommerceOrder.png";
+            return "plugins/Morpheus/images/ecommerceOrder.svg";
         } elseif ($status == 'abandonedCart') {
-            return "plugins/Morpheus/images/ecommerceAbandonedCart.png";
+            return "plugins/Morpheus/images/ecommerceAbandonedCart.svg";
         }
         // Note: it is important that there is no icon when there was no ecommerce conversion
         return null;
@@ -56,18 +58,28 @@ class VisitorDetails extends VisitorDetailsAbstract
     protected function getVisitorGoalConvertedIcon()
     {
         return $this->isVisitorGoalConverted()
-            ? "plugins/Morpheus/images/goal.png"
+            ? "plugins/Morpheus/images/goal.svg"
             : null;
     }
 
     protected function getDaysSinceFirstVisit()
     {
-        return $this->details['visitor_days_since_first'];
+        return floor($this->details['visitor_seconds_since_first'] / 86400);
+    }
+
+    protected function getSecondsSinceFirstVisit()
+    {
+        return $this->details['visitor_seconds_since_first'];
     }
 
     protected function getDaysSinceLastEcommerceOrder()
     {
-        return $this->details['visitor_days_since_order'];
+        return floor($this->details['visitor_seconds_since_order'] / 86400);
+    }
+
+    protected function getSecondsSinceLastEcommerceOrder()
+    {
+        return $this->details['visitor_seconds_since_order'];
     }
 
     protected function getVisitorReturning()

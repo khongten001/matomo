@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,10 +11,23 @@ namespace Piwik\API;
 
 use Exception;
 use Piwik\Common;
+use Piwik\Container\StaticContainer;
+use Piwik\Context;
 use Piwik\Piwik;
-use Piwik\Singleton;
+use Piwik\Plugin\API;
+use Piwik\Plugin\Manager;
 use ReflectionClass;
 use ReflectionMethod;
+
+// prevent upgrade error eg from Matomo 3.x to Matomo 4.x. Refs https://github.com/matomo-org/matomo/pull/16468
+// the `false` is important otherwise it would fail and try to load the proxy.php file again.
+if (!class_exists('Piwik\API\NoDefaultValue', false)) {
+
+    // phpcs:ignoreFile PSR1.Classes.ClassDeclaration.MultipleClasses
+    class NoDefaultValue
+    {
+    }
+}
 
 /**
  * Proxy is a singleton that has the knowledge of every method available, their parameters
@@ -23,15 +36,13 @@ use ReflectionMethod;
  * object, with the parameters in the right order.
  *
  * It will also log the performance of API calls (time spent, parameter values, etc.) if logger available
- *
- * @method static Proxy getInstance()
  */
-class Proxy extends Singleton
+class Proxy
 {
     // array of already registered plugins names
     protected $alreadyRegistered = array();
 
-    private $metadataArray = array();
+    protected $metadataArray = array();
     private $hideIgnoredFunctions = true;
 
     // when a parameter doesn't have a default value we use this
@@ -40,6 +51,11 @@ class Proxy extends Singleton
     public function __construct()
     {
         $this->noDefaultValue = new NoDefaultValue();
+    }
+
+    public static function getInstance()
+    {
+        return StaticContainer::get(self::class);
     }
 
     /**
@@ -71,6 +87,7 @@ class Proxy extends Singleton
         if (isset($this->alreadyRegistered[$className])) {
             return;
         }
+
         $this->includeApiFile($className);
         $this->checkClassIsSingleton($className);
 
@@ -137,29 +154,30 @@ class Proxy extends Singleton
      */
     public function call($className, $methodName, $parametersRequest)
     {
-        $returnedValue = null;
-
         // Temporarily sets the Request array to this API call context
-        $saveGET = $_GET;
-        $saveQUERY_STRING = @$_SERVER['QUERY_STRING'];
-        foreach ($parametersRequest as $param => $value) {
-            $_GET[$param] = $value;
-        }
-
-        try {
+        return Context::executeWithQueryParameters($parametersRequest, function () use ($className, $methodName, $parametersRequest) {
             $this->registerClass($className);
 
-            // instanciate the object
+            $request = new \Piwik\Request($parametersRequest);
+
+            /**
+             * instantiate the object
+             * @var API $object
+             */
             $object = $className::getInstance();
 
             // check method exists
             $this->checkMethodExists($className, $methodName);
 
             // get the list of parameters required by the method
-            $parameterNamesDefaultValues = $this->getParametersList($className, $methodName);
+            $parameterNamesDefaultValuesAndTypes = $this->getParametersListWithTypes($className, $methodName);
 
             // load parameters in the right order, etc.
-            $finalParameters = $this->getRequestParametersArray($parameterNamesDefaultValues, $parametersRequest);
+            if ($object->usesAutoSanitizeInputParams() && !$this->usesUnsanitizedInputParams($className, $methodName)) {
+                $finalParameters = $this->getSanitizedRequestParametersArray($parameterNamesDefaultValuesAndTypes, $request->getParameters());
+            } else {
+                $finalParameters = $this->getRequestParametersArray($parameterNamesDefaultValuesAndTypes, $request);
+            }
 
             // allow plugins to manipulate the value
             $pluginName = $this->getModuleNameFromClassName($className);
@@ -220,12 +238,13 @@ class Proxy extends Singleton
              * @param array &$finalParameters List of parameters that will be passed to the API method.
              * @param string $pluginName The name of the plugin the API method belongs to.
              * @param string $methodName The name of the API method that will be called.
+             * @param array $parametersRequest The query parameters for this request.
              */
-            Piwik::postEvent(sprintf('API.Request.intercept'), [&$returnedValue, $finalParameters, $pluginName, $methodName]);
+            Piwik::postEvent('API.Request.intercept', [&$returnedValue, $finalParameters, $pluginName, $methodName, $parametersRequest]);
 
             $apiParametersInCorrectOrder = array();
 
-            foreach ($parameterNamesDefaultValues as $name => $defaultValue) {
+            foreach ($parameterNamesDefaultValuesAndTypes as $name => $parameter) {
                 if (isset($finalParameters[$name]) || array_key_exists($name, $finalParameters)) {
                     $apiParametersInCorrectOrder[] = $finalParameters[$name];
                 }
@@ -239,9 +258,9 @@ class Proxy extends Singleton
             $endHookParams = array(
                 &$returnedValue,
                 array('className'  => $className,
-                      'module'     => $pluginName,
-                      'action'     => $methodName,
-                      'parameters' => $finalParameters)
+                    'module'     => $pluginName,
+                    'action'     => $methodName,
+                    'parameters' => $finalParameters)
             );
 
             /**
@@ -323,15 +342,8 @@ class Proxy extends Singleton
              */
             Piwik::postEvent('API.Request.dispatch.end', $endHookParams);
 
-            // Restore the request
-            $_GET = $saveGET;
-            $_SERVER['QUERY_STRING'] = $saveQUERY_STRING;
-        } catch (Exception $e) {
-            $_GET = $saveGET;
-            throw $e;
-        }
-
-        return $returnedValue;
+            return $returnedValue;
+        });
     }
 
     /**
@@ -348,6 +360,25 @@ class Proxy extends Singleton
      */
     public function getParametersList($class, $name)
     {
+        return array_combine(
+            array_keys($this->metadataArray[$class][$name]['parameters']),
+            array_column($this->metadataArray[$class][$name]['parameters'], 'default')
+        );
+    }
+
+    /**
+     * Returns the parameters names, default values and types for the method $name
+     * of the class $class
+     *
+     * @param string $class The class name
+     * @param string $name The method name
+     * @return array  Format array(
+     *                            'testParameter' => ['default' => null, 'type' => null], // no default value
+     *                            'life'          => ['default' => 42, 'type' => 'int'], // default value 42, type hint is int
+     *                       );
+     */
+    public function getParametersListWithTypes($class, $name)
+    {
         return $this->metadataArray[$class][$name]['parameters'];
     }
 
@@ -356,7 +387,15 @@ class Proxy extends Singleton
      */
     public function isDeprecatedMethod($class, $methodName)
     {
-        return $this->metadataArray[$class][$methodName]['isDeprecated'];
+        return $this->metadataArray[$class][$methodName]['isDeprecated'] ?? false;
+    }
+
+    /**
+     * Check if given method uses unsanitized input parameters.
+     */
+    public function usesUnsanitizedInputParams($class, $methodName)
+    {
+        return $this->metadataArray[$class][$methodName]['unsanitizedInputParams'] ?? false;
     }
 
     /**
@@ -398,27 +437,39 @@ class Proxy extends Singleton
     }
 
     /**
-     * Returns an array containing the values of the parameters to pass to the method to call
+     * Returns an array containing the *sanitized* values of the parameters to pass to the method to call
      *
      * @param array $requiredParameters array of (parameter name, default value)
      * @param array $parametersRequest
      * @throws Exception
      * @return array values to pass to the function call
      */
-    private function getRequestParametersArray($requiredParameters, $parametersRequest)
+    private function getSanitizedRequestParametersArray($requiredParameters, $parametersRequest)
     {
-        $finalParameters = array();
-        foreach ($requiredParameters as $name => $defaultValue) {
+        $finalParameters = [];
+        foreach ($requiredParameters as $name => $parameter) {
             try {
-                if ($defaultValue instanceof NoDefaultValue) {
-                    $requestValue = Common::getRequestVar($name, null, null, $parametersRequest);
+                $defaultValue = $parameter['default'];
+                $type = $parameter['type'];
+                $request = new \Piwik\Request($parametersRequest);
+
+                if (in_array($name, ['segment', 'password', 'passwordConfirmation']) && !empty($parametersRequest[$name])) {
+                    // special handling for some parameters:
+                    // segment: we do not want to sanitize user input as it would break the segment encoding
+                    // password / passwordConfirmation: sanitizing this parameters might change special chars in passwords, breaking login and confirmation boxes
+                    $requestValue = ($parametersRequest[$name]);
+                } elseif ($defaultValue instanceof NoDefaultValue) {
+                    if ($type === 'bool') {
+                        $requestValue = $request->getBoolParameter($name);
+                    } else {
+                        $requestValue = Common::getRequestVar($name, null, $type, $parametersRequest);
+                    }
                 } else {
                     try {
-                        if ($name == 'segment' && !empty($parametersRequest['segment'])) {
-                            // segment parameter is an exception: we do not want to sanitize user input or it would break the segment encoding
-                            $requestValue = ($parametersRequest['segment']);
+                        if ($type === 'bool') {
+                            $requestValue = $request->getBoolParameter($name, $defaultValue);
                         } else {
-                            $requestValue = Common::getRequestVar($name, $defaultValue, null, $parametersRequest);
+                            $requestValue = Common::getRequestVar($name, $defaultValue, $type, $parametersRequest);
                         }
                     } catch (Exception $e) {
                         // Special case: empty parameter in the URL, should return the empty string
@@ -440,6 +491,62 @@ class Proxy extends Singleton
     }
 
     /**
+     * Returns an array containing the values of the parameters to pass to the method to call
+     *
+     * @param array $requiredParameters array of (parameter name, default value)
+     * @param \Piwik\Request $request
+     * @throws Exception
+     * @return array values to pass to the function call
+     */
+    private function getRequestParametersArray($requiredParameters, \Piwik\Request $request): array
+    {
+        $finalParameters = [];
+        foreach ($requiredParameters as $name => $parameter) {
+            try {
+                $defaultValue = $parameter['default'];
+                $type = $parameter['type'] ?? '';
+                $requestValue = null;
+
+                switch (strtolower($type)) {
+                    case 'bool':
+                        $method = 'getBoolParameter';
+                        break;
+                    case 'int':
+                        $method = 'getIntegerParameter';
+                        break;
+                    case 'string':
+                        $method = 'getStringParameter';
+                        break;
+                    case 'float':
+                        $method = 'getFloatParameter';
+                        break;
+                    case 'array':
+                        $method = 'getArrayParameter';
+                        break;
+                    default:
+                        $method = 'getParameter';
+                }
+
+                if ($defaultValue instanceof NoDefaultValue) {
+                    $requestValue = $request->$method($name);
+                } elseif ($defaultValue === null) {
+                    try {
+                        $requestValue = $request->$method($name);
+                    } catch (\InvalidArgumentException $e) {
+                        $requestValue = null;
+                    }
+                } else {
+                    $requestValue = $request->$method($name, $defaultValue);
+                }
+            } catch (Exception $e) {
+                throw new Exception(Piwik::translate('General_PleaseSpecifyValue', [$name]));
+            }
+            $finalParameters[$name] = $requestValue;
+        }
+        return $finalParameters;
+    }
+
+    /**
      * Includes the class API by looking up plugins/xxx/API.php
      *
      * @param string $fileName api class name eg. "API"
@@ -448,7 +555,7 @@ class Proxy extends Singleton
     private function includeApiFile($fileName)
     {
         $module = self::getModuleNameFromClassName($fileName);
-        $path = PIWIK_INCLUDE_PATH . '/plugins/' . $module . '/API.php';
+        $path = Manager::getPluginDirectory($module) . '/API.php';
 
         if (is_readable($path)) {
             require_once $path; // prefixed by PIWIK_INCLUDE_PATH
@@ -479,11 +586,23 @@ class Proxy extends Singleton
                 $defaultValue = $parameter->getDefaultValue();
             }
 
-            $aParameters[$nameVariable] = $defaultValue;
+            $type = $parameter->getType();
+
+            // In case no default value is defined in the method, but the type hint allows null, we assume null as default value
+            if ($type && $type->allowsNull() && $defaultValue === $this->noDefaultValue) {
+                $defaultValue = null;
+            }
+
+            $aParameters[$nameVariable] = [
+                'default' => $defaultValue,
+                'type' => ($type && $type->isBuiltin()) ? $type->getName() : null,
+                'allowsNull' => $type ? $type->allowsNull() : $defaultValue === null,
+            ];
         }
         $this->metadataArray[$class][$name]['parameters'] = $aParameters;
         $this->metadataArray[$class][$name]['numberOfRequiredParameters'] = $method->getNumberOfRequiredParameters();
         $this->metadataArray[$class][$name]['isDeprecated'] = false !== strstr($docComment, '@deprecated');
+        $this->metadataArray[$class][$name]['unsanitizedInputParams'] = false !== strstr($docComment, '@unsanitized');
     }
 
     /**
@@ -577,12 +696,4 @@ class Proxy extends Singleton
             throw new Exception("$className that provide an API must be Singleton and have a 'public static function getInstance()' method.");
         }
     }
-}
-
-/**
- * To differentiate between "no value" and default value of null
- *
- */
-class NoDefaultValue
-{
 }

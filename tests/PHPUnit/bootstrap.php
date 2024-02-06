@@ -1,8 +1,6 @@
 <?php
 
 use Piwik\Application\Environment;
-use Piwik\Container\StaticContainer;
-use Piwik\Http;
 use Piwik\Intl\Locale;
 use Piwik\Config;
 use Piwik\SettingsPiwik;
@@ -25,20 +23,29 @@ if (!defined('PIWIK_INCLUDE_PATH')) {
     define('PIWIK_INCLUDE_PATH', PIWIK_PATH_TEST_TO_ROOT);
 }
 
+if (file_exists(PIWIK_DOCUMENT_ROOT . '/bootstrap.php')) {
+    require_once PIWIK_DOCUMENT_ROOT . '/bootstrap.php';
+}
+
 if (!defined('PIWIK_INCLUDE_SEARCH_PATH')) {
     define('PIWIK_INCLUDE_SEARCH_PATH', get_include_path()
-        . PATH_SEPARATOR . PIWIK_INCLUDE_PATH . '/vendor/bin'
-        . PATH_SEPARATOR . PIWIK_INCLUDE_PATH . '/core'
-        . PATH_SEPARATOR . PIWIK_INCLUDE_PATH . '/libs'
-        . PATH_SEPARATOR . PIWIK_INCLUDE_PATH . '/plugins');
+      . PATH_SEPARATOR . PIWIK_INCLUDE_PATH . '/vendor/bin'
+      . PATH_SEPARATOR . PIWIK_INCLUDE_PATH . '/core'
+      . PATH_SEPARATOR . PIWIK_INCLUDE_PATH . '/libs'
+      . PATH_SEPARATOR . PIWIK_INCLUDE_PATH . '/plugins');
 }
 @ini_set('include_path', PIWIK_INCLUDE_SEARCH_PATH);
 @set_include_path(PIWIK_INCLUDE_SEARCH_PATH);
 @ini_set('memory_limit', -1);
 
-require_once PIWIK_INCLUDE_PATH . '/core/bootstrap.php';
+$GLOBALS['MATOMO_PLUGIN_DIRS'] = array(
+  array(
+    'pluginsPathAbsolute' => PIWIK_INCLUDE_PATH . '/tests/resources/custompluginsdir',
+    'webrootDirRelativeToMatomo' => 'tests/resources/custompluginsdir'
+  ),
+);
 
-require_once PIWIK_INCLUDE_PATH . '/libs/PiwikTracker/PiwikTracker.php';
+require_once PIWIK_INCLUDE_PATH . '/core/bootstrap.php';
 
 if (getenv('PIWIK_USE_XHPROF') == 1) {
     \Piwik\Profiler::setupProfilerXHProf();
@@ -49,20 +56,24 @@ function setPiwikDomainFromEnvVar()
     $piwikDomain = getenv('PIWIK_DOMAIN');
     if (!empty($piwikDomain)) {
         $_SERVER['HTTP_HOST'] = $piwikDomain;
+        $_SERVER['SERVER_NAME'] = $piwikDomain;
     }
 }
 
 setPiwikDomainFromEnvVar();
 
 // setup container for tests
-function setupRootContainer() {
+function setupRootContainer($enable = false)
+{
     // before running tests, delete the TestingEnvironmentVariables file, since it can indirectly mess w/
     // phpunit's class loading (if a test class is loaded in bootstrap.php, phpunit can't load it from a file,
     // so executing the tests in a file will fail)
-    $vars = new TestingEnvironmentVariables();
-    $vars->delete();
+    if($enable) {
+        $vars = new TestingEnvironmentVariables();
+        $vars->delete();
 
-    Environment::setGlobalEnvironmentManipulator(new TestingEnvironmentManipulator($vars));
+        Environment::setGlobalEnvironmentManipulator(new TestingEnvironmentManipulator($vars));
+    }
 
     $rootTestEnvironment = new \Piwik\Application\Environment(null);
     $rootTestEnvironment->init();
@@ -120,7 +131,7 @@ function prepareTestDatabaseConfig(Config $config)
     $config->forceSave();
 }
 
-if (!SettingsPiwik::isPiwikInstalled()) {
+if (!SettingsPiwik::isMatomoInstalled()) {
     throw new Exception('Piwik needs to be installed in order to run the tests');
 }
 
@@ -128,7 +139,9 @@ $config = Config::getInstance();
 
 prepareServerVariables($config);
 prepareTestDatabaseConfig($config);
+setupRootContainer(true);
 checkPiwikSetupForTests();
+printTestDoxHint();
 
 function checkPiwikSetupForTests()
 {
@@ -148,5 +161,9 @@ remote_addr = \"127.0.0.1\"
 Try again.";
         exit(1);
     }
+}
 
+function printTestDoxHint()
+{
+    print "\nIf these tests time out consistently, it can be helpful to temporarily set testdox=true in the phpunit.xml.dist in order to see which test is causing the issue.\n";
 }

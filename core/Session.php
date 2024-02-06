@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,7 +11,9 @@ namespace Piwik;
 use Exception;
 use Piwik\Container\StaticContainer;
 use Piwik\Exception\MissingFilePermissionException;
+use Piwik\Plugins\Overlay\Overlay;
 use Piwik\Session\SaveHandler\DbTable;
+use Piwik\Log\LoggerInterface;
 use Zend_Session;
 
 /**
@@ -19,23 +21,11 @@ use Zend_Session;
  */
 class Session extends Zend_Session
 {
-    const SESSION_NAME = 'PIWIK_SESSID';
+    const SESSION_NAME = 'MATOMO_SESSID';
 
     public static $sessionName = self::SESSION_NAME;
 
     protected static $sessionStarted = false;
-
-    /**
-     * Are we using file-based session store?
-     *
-     * @return bool  True if file-based; false otherwise
-     */
-    public static function isFileBasedSessions()
-    {
-        $config = Config::getInstance();
-        return !isset($config->General['session_save_handler'])
-        || $config->General['session_save_handler'] === 'files';
-    }
 
     /**
      * Start the session
@@ -49,10 +39,15 @@ class Session extends Zend_Session
         if (headers_sent()
             || self::$sessionStarted
             || (defined('PIWIK_ENABLE_SESSION_START') && !PIWIK_ENABLE_SESSION_START)
+            || session_status() == PHP_SESSION_ACTIVE
         ) {
             return;
         }
         self::$sessionStarted = true;
+
+        if (defined('PIWIK_SESSION_NAME')) {
+            self::$sessionName = PIWIK_SESSION_NAME;
+        }
 
         $config = Config::getInstance();
 
@@ -77,13 +72,15 @@ class Session extends Zend_Session
         // incorrectly invalidate the session
         @ini_set('session.referer_check', '');
 
-        // to preserve previous behavior piwik_auth provided when it contained a token_auth, we ensure
+        // to preserve previous behavior matomo_auth provided when it contained a token_auth, we ensure
         // the session data won't be deleted until the cookie expires.
         @ini_set('session.gc_maxlifetime', $config->General['login_cookie_expire']);
 
+        @ini_set('session.cookie_path', empty($config->General['login_cookie_path']) ? '/' : $config->General['login_cookie_path']);
+
         $currentSaveHandler = ini_get('session.save_handler');
 
-        if (self::isFileBasedSessions()) {
+        if (!SettingsPiwik::isMatomoInstalled()) {
             // Note: this handler doesn't work well in load-balanced environments and may have a concurrency issue with locked session files
 
             // for "files", use our own folder to prevent local session file hijacking
@@ -93,20 +90,18 @@ class Session extends Zend_Session
 
             @ini_set('session.save_handler', 'files');
             @ini_set('session.save_path', $sessionPath);
-        } elseif ($config->General['session_save_handler'] === 'dbtable'
-            || in_array($currentSaveHandler, array('user', 'mm'))
-        ) {
+        } else {
+            // as of Matomo 3.7.0 we only support files session handler during installation
+
             // We consider these to be misconfigurations, in that:
             // - user  - we can't verify that user-defined session handler functions have already been set via session_set_save_handler()
             // - mm    - this handler is not recommended, unsupported, not available for Windows, and has a potential concurrency issue
 
-            $config = array(
-                'name'           => Common::prefixTable('session'),
-                'primary'        => 'id',
-                'modifiedColumn' => 'modified',
-                'dataColumn'     => 'data',
-                'lifetimeColumn' => 'lifetime',
-            );
+            if (@ini_get('session.serialize_handler') !== 'php_serialize') {
+                @ini_set('session.serialize_handler', 'php_serialize');
+            }
+
+            $config = self::getDbTableConfig();
 
             $saveHandler = new DbTable($config);
             if ($saveHandler) {
@@ -114,28 +109,27 @@ class Session extends Zend_Session
             }
         }
 
-        // garbage collection may disabled by default (e.g., Debian)
-        if (ini_get('session.gc_probability') == 0) {
-            @ini_set('session.gc_probability', 1);
-        }
+        // set garbage collection according to user preferences (on by default)
+        @ini_set('session.gc_probability', Config::getInstance()->General['session_gc_probability']);
 
         try {
             parent::start();
             register_shutdown_function(array('Zend_Session', 'writeClose'), true);
         } catch (Exception $e) {
-            Log::error('Unable to start session: ' . $e->getMessage());
+            StaticContainer::get(LoggerInterface::class)->error('Unable to start session: {exception}', [
+                'exception' => $e,
+                'ignoreInScreenWriter' => true,
+            ]);
 
-            $enableDbSessions = '';
-            if (DbHelper::isInstalled()) {
-                $enableDbSessions = "<br/>If you still experience issues after trying these changes,
-			            			we recommend that you <a href='https://matomo.org/faq/how-to-install/#faq_133' rel='noreferrer noopener' target='_blank'>enable database session storage</a>.";
+            if (SettingsPiwik::isMatomoInstalled()) {
+                $pathToSessions = '';
+            } else {
+                $pathToSessions = Filechecks::getErrorMessageMissingPermissions(self::getSessionsDirectory());
             }
 
-            $pathToSessions = Filechecks::getErrorMessageMissingPermissions(self::getSessionsDirectory());
-            $message = sprintf("Error: %s %s %s\n<pre>Debug: the original error was \n%s</pre>",
+            $message = sprintf("Error: %s %s\n<pre>Debug: the original error was \n%s</pre>",
                 Piwik::translate('General_ExceptionUnableToStartSession'),
                 $pathToSessions,
-                $enableDbSessions,
                 $e->getMessage()
             );
 
@@ -158,11 +152,85 @@ class Session extends Zend_Session
 
     public static function close()
     {
-        parent::writeClose();
+        if (self::isSessionStarted()) {
+            // only write/close session if the session was actually started by us
+            // otherwise we will set the session values to base64 encoded and whoever the session started might not expect the values in that way
+            parent::writeClose();
+        }
     }
 
     public static function isSessionStarted()
     {
         return self::$sessionStarted;
+    }
+
+    public static function getSameSiteCookieValue()
+    {
+        $config = Config::getInstance();
+        $general = $config->General;
+
+        $module = Piwik::getModule();
+        $action = Piwik::getAction();
+        $method = Common::getRequestVar('method', '', 'string');
+        $referer = Url::getReferrer();
+
+        $isOptOutRequest = $module == 'CoreAdminHome' && ($action == 'optOut' || $action == 'optOutJS');
+        $shouldUseNone = !empty($general['enable_framed_pages']) || $isOptOutRequest || Overlay::isOverlayRequest($module, $action, $method, $referer);
+
+        if ($shouldUseNone && ProxyHttp::isHttps()) {
+            return 'None';
+        }
+
+        return 'Lax';
+    }
+
+    /**
+     * Write cookie header.  Similar to the native setcookie() function but also supports
+     * the SameSite cookie property.
+     * @param $name
+     * @param $value
+     * @param int $expires
+     * @param string $path
+     * @param string $domain
+     * @param bool $secure
+     * @param bool $httpOnly
+     * @param string $sameSite
+     * @return string
+     */
+    public static function writeCookie($name, $value, $expires = 0, $path = '/', $domain = '/', $secure = false, $httpOnly = false, $sameSite = 'lax')
+    {
+        $headerStr = 'Set-Cookie: ' . rawurlencode($name) . '=' . rawurlencode($value);
+        if ($expires) {
+            $headerStr .= '; expires=' . gmdate('D, d-M-Y H:i:s', $expires) . ' GMT';
+        }
+        if ($path) {
+            $headerStr .= '; path=' . $path;
+        }
+        if ($domain) {
+            $headerStr .= '; domain=' . rawurlencode($domain);
+        }
+        if ($secure) {
+            $headerStr .= '; secure';
+        }
+        if ($httpOnly) {
+            $headerStr .= '; httponly';
+        }
+        if ($sameSite) {
+            $headerStr .= '; SameSite=' . $sameSite;
+        }
+
+        Common::sendHeader($headerStr);
+        return $headerStr;
+    }
+
+    public static function getDbTableConfig()
+    {
+        return array(
+            'name'           => Common::prefixTable(DbTable::TABLE_NAME),
+            'primary'        => 'id',
+            'modifiedColumn' => 'modified',
+            'dataColumn'     => 'data',
+            'lifetimeColumn' => 'lifetime',
+        );
     }
 }

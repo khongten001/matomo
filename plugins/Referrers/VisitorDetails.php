@@ -1,13 +1,14 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link    http://piwik.org
+ * @link    https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\Referrers;
 
+use Piwik\Common;
 use Piwik\Plugins\Live\VisitorDetailsAbstract;
 use Piwik\UrlHelper;
 use Piwik\View;
@@ -31,6 +32,7 @@ class VisitorDetails extends VisitorDetailsAbstract
     public function renderVisitorDetails($visitorDetails)
     {
         $view            = new View('@Referrers/_visitorDetails.twig');
+        $view->sendHeadersWhenRendering = false;
         $view->visitInfo = $visitorDetails;
         return [[ 10, $view->render() ]];
     }
@@ -53,7 +55,7 @@ class VisitorDetails extends VisitorDetailsAbstract
 
     protected function getKeyword()
     {
-        $keyword = $this->details['referer_keyword'];
+        $keyword = Common::unsanitizeInputValue($this->details['referer_keyword']);
 
         if ($this->getReferrerType() == 'search') {
             $keyword = API::getCleanKeyword($keyword);
@@ -92,9 +94,9 @@ class VisitorDetails extends VisitorDetailsAbstract
         return null;
     }
 
-    protected function getReferrerName()
+    protected function getReferrerName(): string
     {
-        return urldecode($this->details['referer_name']);
+         return html_entity_decode(($this->details['referer_name'] ?? ''), ENT_QUOTES, "UTF-8");
     }
 
     protected function getSearchEngineUrl()

@@ -1,5 +1,6 @@
 <?php
 
+ini_set('display_errors', 0);
 define('PIWIK_PRINT_ERROR_BACKTRACE', true);
 define('PIWIK_ENABLE_DISPATCH', false);
 
@@ -12,10 +13,10 @@ $environment->init();
 
 class MyClass
 {
-    public function triggerError()
+    public function triggerError($arg1, $arg2)
     {
         try {
-            \Piwik\ErrorHandler::pushFatalErrorBreadcrumb(static::class);
+            \Piwik\ErrorHandler::pushFatalErrorBreadcrumb(static::class, ['arg1' => $arg1, 'arg2' => $arg2]);
 
             $val = "";
             while (true) {
@@ -32,7 +33,7 @@ class MyClass
             \Piwik\ErrorHandler::pushFatalErrorBreadcrumb(static::class);
 
             $instance = new MyClass();
-            $instance->triggerError();
+            $instance->triggerError('argval', 'another');
         } finally {
             \Piwik\ErrorHandler::popFatalErrorBreadcrumb();
         }

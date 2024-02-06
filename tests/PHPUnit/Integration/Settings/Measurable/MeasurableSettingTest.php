@@ -1,14 +1,13 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  */
 
 namespace Piwik\Tests\Integration\Settings\Plugin;
 
-use Piwik\Config;
 use Piwik\Db;
 use Piwik\Settings\FieldConfig;
 use Piwik\Settings\Measurable\MeasurableSetting;
@@ -23,8 +22,7 @@ use Piwik\Tests\Integration\Settings\IntegrationTestCase;
  */
 class MeasurableSettingTest extends IntegrationTestCase
 {
-
-    public function setUp()
+    public function setUp(): void
     {
         parent::setUp();
         foreach (array(2,3) as $idSite) {
@@ -94,5 +92,4 @@ class MeasurableSettingTest extends IntegrationTestCase
 
         return $userSetting;
     }
-
 }

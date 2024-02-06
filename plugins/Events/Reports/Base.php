@@ -1,18 +1,21 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\Events\Reports;
 
+use Piwik\DataTable;
 use Piwik\EventDispatcher;
+use Piwik\Common;
 use Piwik\Plugin\ViewDataTable;
 use Piwik\Plugins\Events\API;
 use Piwik\Plugins\Events\Columns\Metrics\AverageEventValue;
 use Piwik\Report\ReportWidgetFactory;
+use Piwik\Url;
 use Piwik\Widget\WidgetsList;
 
 abstract class Base extends \Piwik\Plugin\Report
@@ -21,6 +24,7 @@ abstract class Base extends \Piwik\Plugin\Report
     {
         $this->categoryId = 'General_Actions';
         $this->subcategoryId = 'Events_Events';
+        $this->onlineGuideUrl = Url::addCampaignParametersToMatomoLink('https://matomo.org/docs/event-tracking/');
 
         $this->processedMetrics = array(
             new AverageEventValue()
@@ -40,6 +44,20 @@ abstract class Base extends \Piwik\Plugin\Report
 
     public function configureView(ViewDataTable $view)
     {
+        if (Common::getRequestVar('secondaryDimension', '', 'string')) {
+            foreach (['pivotBy', 'pivotByColumn'] as $property) {
+                $index = array_search($property, $view->requestConfig->overridableProperties);
+                if ($index) {
+                    unset($view->requestConfig->overridableProperties[$index]);
+                }
+            }
+            $view->requestConfig->overridableProperties = array_values($view->requestConfig->overridableProperties);
+        }
+
+        if (property_exists($view->config, 'selectable_columns')) {
+            $view->config->selectable_columns = ['nb_events', 'nb_visits', 'sum_event_value', 'nb_events_with_value'];
+        }
+
         $this->configureFooterMessage($view);
     }
 
@@ -50,10 +68,10 @@ abstract class Base extends \Piwik\Plugin\Report
             return;
         }
 
-        $out = '';
-        EventDispatcher::getInstance()->postEvent('Template.afterEventsReport', array(&$out));
-        $view->config->show_footer_message = $out;
+        $view->config->filters[] = function (DataTable $dataTable) use ($view) {
+            $out = '';
+            EventDispatcher::getInstance()->postEvent('Template.afterEventsReport', [&$out, $dataTable]);
+            $view->config->show_footer_message = $out;
+        };
     }
-
-
 }

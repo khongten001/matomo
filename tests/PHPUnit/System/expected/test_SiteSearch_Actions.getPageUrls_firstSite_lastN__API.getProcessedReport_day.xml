@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <result>
 	<website>Site 1 - Site search</website>
-	<prettyDate>January 3 – 9, 2010</prettyDate>
+	<prettyDate>January 3 – 9, 2010</prettyDate>
 	<metadata>
 		<category>Actions</category>
 		<subcategory>Pages</subcategory>
@@ -27,7 +27,44 @@
 			<exit_rate>Exit rate</exit_rate>
 			<avg_time_generation>Avg. generation time</avg_time_generation>
 		</processedMetrics>
+		<metricTypes>
+			<nb_hits>number</nb_hits>
+			<nb_visits>number</nb_visits>
+			<avg_time_on_page>duration_s</avg_time_on_page>
+			<bounce_rate>percent</bounce_rate>
+			<exit_rate>percent</exit_rate>
+			<avg_time_generation>duration_s</avg_time_generation>
+		</metricTypes>
 		<actionToLoadSubTables>getPageUrls</actionToLoadSubTables>
+		<relatedReports>
+			<row>
+				<name>Entry pages</name>
+				<module>Actions</module>
+				<action>getEntryPageUrls</action>
+			</row>
+			<row>
+				<name>Exit pages</name>
+				<module>Actions</module>
+				<action>getExitPageUrls</action>
+			</row>
+		</relatedReports>
+		<metricsGoal>
+			<nb_conversions>Conversions</nb_conversions>
+			<nb_conversions_attrib>Conversions</nb_conversions_attrib>
+			<revenue_attrib>Revenue</revenue_attrib>
+		</metricsGoal>
+		<processedMetricsGoal>
+			<revenue_per_visit>Revenue per Visit</revenue_per_visit>
+			<nb_conversions_page_rate>Viewed before conversion rate</nb_conversions_page_rate>
+		</processedMetricsGoal>
+		<metricTypesGoal>
+			<revenue_per_visit>money</revenue_per_visit>
+			<nb_conversions>number</nb_conversions>
+			<conversion_rate>percent</conversion_rate>
+			<nb_conversions_attrib>number</nb_conversions_attrib>
+			<revenue_attrib>money</revenue_attrib>
+			<nb_conversions_page_rate>percent</nb_conversions_page_rate>
+		</metricTypesGoal>
 		<imageGraphUrl>index.php?module=API&amp;method=ImageGraph.get&amp;idSite=1&amp;apiModule=Actions&amp;apiAction=getPageUrls&amp;period=range&amp;date=2010-01-03,2010-01-09</imageGraphUrl>
 		<imageGraphEvolutionUrl>index.php?module=API&amp;method=ImageGraph.get&amp;idSite=1&amp;apiModule=Actions&amp;apiAction=getPageUrls&amp;period=day&amp;date=2010-01-03,2010-01-09</imageGraphEvolutionUrl>
 		<uniqueId>Actions_getPageUrls</uniqueId>
@@ -78,15 +115,15 @@
 		<result prettyDate="Sunday, January 3, 2010">
 			<row>
 				<url>http://example.org/index.htm</url>
-				<segment>pageUrl==http%3A%2F%2Fexample.org%2Findex.htm</segment>
+				<segment>pageUrl==http%253A%252F%252Fexample.org%252Findex.htm</segment>
 			</row>
 			<row>
 				<url>http://example.org/index.htm?gkwd=SHOULD be a PageView, NOT a search</url>
-				<segment>pageUrl==http%3A%2F%2Fexample.org%2Findex.htm%3Fgkwd%3DSHOULD+be+a+PageView%2C+NOT+a+search</segment>
+				<segment>pageUrl==http%253A%252F%252Fexample.org%252Findex.htm%253Fgkwd%253DSHOULD%2Bbe%2Ba%2BPageView%252C%2BNOT%2Ba%2Bsearch</segment>
 			</row>
 			<row>
 				<url>http://example.org/index.htm?random=PAGEVIEW, NOT SEARCH&amp;mykwd=&amp;IS_FOLLOWING_SEARCH ONCE</url>
-				<segment>pageUrl==http%3A%2F%2Fexample.org%2Findex.htm%3Frandom%3DPAGEVIEW%2C+NOT+SEARCH%26mykwd%3D%26IS_FOLLOWING_SEARCH+ONCE</segment>
+				<segment>pageUrl==http%253A%252F%252Fexample.org%252Findex.htm%253Frandom%253DPAGEVIEW%252C%2BNOT%2BSEARCH%2526mykwd%253D%2526IS_FOLLOWING_SEARCH%2BONCE</segment>
 			</row>
 		</result>
 		<result prettyDate="Monday, January 4, 2010" />
@@ -100,7 +137,11 @@
 		<nb_visits>3</nb_visits>
 		<nb_uniq_visitors>3</nb_uniq_visitors>
 		<nb_hits>4</nb_hits>
-		<exit_nb_visits>1</exit_nb_visits>
+		<sum_time_spent>252</sum_time_spent>
+		<nb_hits_following_search>2</nb_hits_following_search>
+		<sum_bandwidth>0</sum_bandwidth>
+		<nb_hits_with_bandwidth>0</nb_hits_with_bandwidth>
 		<exit_nb_uniq_visitors>1</exit_nb_uniq_visitors>
+		<exit_nb_visits>1</exit_nb_visits>
 	</reportTotal>
 </result>

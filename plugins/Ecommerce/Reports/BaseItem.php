@@ -1,15 +1,14 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\Ecommerce\Reports;
 
 use Piwik\Common;
-use Piwik\DataTable;
 use Piwik\Metrics\Formatter;
 use Piwik\Piwik;
 use Piwik\Plugin\ViewDataTable;
@@ -18,7 +17,6 @@ use Piwik\Plugins\Goals\Columns\Metrics\AveragePrice;
 use Piwik\Plugins\Goals\Columns\Metrics\AverageQuantity;
 use Piwik\Plugins\Goals\Columns\Metrics\ProductConversionRate;
 use Piwik\Plugins\Goals\Conversions;
-use Piwik\Plugins\Goals\Model;
 use Piwik\Report\ReportWidgetFactory;
 use Piwik\Widget\WidgetsList;
 
@@ -49,7 +47,7 @@ abstract class BaseItem extends Base
 
     public function getMetricsDocumentation()
     {
-        // we do not check whether it is abondon carts if not set re performance improvements
+        // we do not check whether it is abandon carts if not set re performance improvements
         if ($this->isAbandonedCart($fetchIfNotSet = false)) {
             return array(
                 'revenue'         => Piwik::translate('Goals_ColumnRevenueDocumentation',

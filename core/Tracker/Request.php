@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,16 +10,17 @@ namespace Piwik\Tracker;
 
 use Exception;
 use Piwik\Common;
-use Piwik\Config;
 use Piwik\Container\StaticContainer;
 use Piwik\Cookie;
 use Piwik\Exception\InvalidRequestParameterException;
 use Piwik\Exception\UnexpectedWebsiteFoundException;
+use Piwik\Http;
 use Piwik\IP;
-use Piwik\Network\IPUtils;
+use Matomo\Network\IPUtils;
 use Piwik\Piwik;
-use Piwik\Plugins\CustomVariables\CustomVariables;
 use Piwik\Plugins\UsersManager\UsersManager;
+use Piwik\ProxyHttp;
+use Piwik\Segment\SegmentExpression;
 use Piwik\Tracker;
 use Piwik\Cache as PiwikCache;
 
@@ -43,6 +44,8 @@ class Request
     private $isEmptyRequest = false;
 
     protected $tokenAuth;
+
+    protected $timestamp;
 
     /**
      * Stores plugin specific tracking request metadata. RequestProcessors can store
@@ -71,7 +74,7 @@ class Request
         $this->tokenAuth = $tokenAuth;
         $this->timestamp = time();
         $this->isEmptyRequest = empty($params);
-        $this->customTimestampDoesNotRequireTokenauthWhenNewerThan = (int) TrackerConfig::getConfigValue('tracking_requests_require_authentication_when_custom_timestamp_newer_than');
+
 
         // When the 'url' and referrer url parameter are not given, we might be in the 'Simple Image Tracker' mode.
         // The URL can default to the Referrer, which will be in this case
@@ -86,12 +89,34 @@ class Request
             }
         }
 
-        // check for 4byte utf8 characters in url and replace them with �
-        // @TODO Remove as soon as our database tables use utf8mb4 instead of utf8
-        if (array_key_exists('url', $this->params) && preg_match('/[\x{10000}-\x{10FFFF}]/u', $this->params['url'])) {
-            Common::printDebug("Unsupport character detected. Replacing with \xEF\xBF\xBD");
-            $this->params['url'] = preg_replace('/[\x{10000}-\x{10FFFF}]/u', "\xEF\xBF\xBD", $this->params['url']);
+        // check for 4byte utf8 characters in all tracking params and replace them with � if not support by database
+        $this->params = $this->replaceUnsupportedUtf8Chars($this->params);
+
+        $this->customTimestampDoesNotRequireTokenauthWhenNewerThan = (int) TrackerConfig::getConfigValue('tracking_requests_require_authentication_when_custom_timestamp_newer_than',
+            $this->getIdSiteIfExists());
+    }
+
+    protected function replaceUnsupportedUtf8Chars($value, $key = false)
+    {
+        $dbSettings   = new \Piwik\Db\Settings();
+        $charset      = $dbSettings->getUsedCharset();
+
+        if ('utf8mb4' === $charset) {
+            return $value; // no need to replace anything if utf8mb4 is supported
         }
+
+        if (is_string($value) && preg_match('/[\x{10000}-\x{10FFFF}]/u', $value)) {
+            Common::printDebug("Unsupported character detected in $key. Replacing with \xEF\xBF\xBD");
+            return preg_replace('/[\x{10000}-\x{10FFFF}]/u', "\xEF\xBF\xBD", $value);
+        }
+
+        if (is_array($value)) {
+            array_walk_recursive($value, function (&$value, $key) {
+                $value = $this->replaceUnsupportedUtf8Chars($value, $key);
+            });
+        }
+
+        return $value;
     }
 
     /**
@@ -127,12 +152,13 @@ class Request
      */
     protected function authenticateTrackingApi($tokenAuth)
     {
-        $shouldAuthenticate = TrackerConfig::getConfigValue('tracking_requests_require_authentication');
+        $shouldAuthenticate = TrackerConfig::getConfigValue('tracking_requests_require_authentication', $this->getIdSiteIfExists());
 
         if ($shouldAuthenticate) {
             try {
                 $idSite = $this->getIdSite();
             } catch (Exception $e) {
+                Common::printDebug("failed to authenticate: invalid idSite");
                 $this->isAuthenticated = false;
                 return;
             }
@@ -161,6 +187,8 @@ class Request
 
             if ($this->isAuthenticated) {
                 Common::printDebug("token_auth is authenticated!");
+            } else {
+                StaticContainer::get('Piwik\Tracker\Failures')->logFailure(Failures::FAILURE_ID_NOT_AUTHENTICATED, $this);
             }
         } else {
             $this->isAuthenticated = true;
@@ -172,6 +200,19 @@ class Request
     {
         if (empty($tokenAuth)) {
             return false;
+        }
+
+        // Now checking the list of admin token_auth cached in the Tracker config file
+        if (!empty($idSite) && $idSite > 0) {
+            $website = Cache::getCacheWebsiteAttributes($idSite);
+            $userModel = new \Piwik\Plugins\UsersManager\Model();
+            $tokenAuthHashed = $userModel->hashTokenAuth($tokenAuth);
+            $hashedToken = UsersManager::hashTrackingToken((string) $tokenAuthHashed, $idSite);
+
+            if (array_key_exists('tracking_token_auth', $website)
+                && in_array($hashedToken, $website['tracking_token_auth'], true)) {
+                return true;
+            }
         }
 
         Piwik::postEvent('Request.initAuthenticationObject');
@@ -188,90 +229,82 @@ class Request
             return true;
         }
 
-        // Now checking the list of admin token_auth cached in the Tracker config file
-        if (!empty($idSite) && $idSite > 0) {
-            $website = Cache::getCacheWebsiteAttributes($idSite);
-            $hashedToken = UsersManager::hashTrackingToken((string) $tokenAuth, $idSite);
-
-            if (array_key_exists('tracking_token_auth', $website)
-                && in_array($hashedToken, $website['tracking_token_auth'], true)) {
-                return true;
-            }
-        }
-
         Common::printDebug("WARNING! token_auth = $tokenAuth is not valid, Super User / Admin / Write was NOT authenticated");
+
+        /**
+         * @ignore
+         * @internal
+         */
+        Piwik::postEvent('Tracker.Request.authenticate.failed');
 
         return false;
     }
 
-    /**
-     * @return float|int
-     */
-    public function getDaysSinceFirstVisit()
+    public function isRequestExcluded()
     {
-        $cookieFirstVisitTimestamp = $this->getParam('_idts');
+        $excludedRequests = TrackerConfig::getConfigValue('exclude_requests', $this->getIdSiteIfExists());
 
-        if (!$this->isTimestampValid($cookieFirstVisitTimestamp)) {
-            $cookieFirstVisitTimestamp = $this->getCurrentTimestamp();
-        }
+        if (!empty($excludedRequests)) {
+            $excludedRequests = explode(',', $excludedRequests);
+            $pattern = '/^(.+?)(' . SegmentExpression::MATCH_EQUAL . '|'
+                . SegmentExpression::MATCH_NOT_EQUAL . '|'
+                . SegmentExpression::MATCH_CONTAINS . '|'
+                . SegmentExpression::MATCH_DOES_NOT_CONTAIN . '|'
+                . preg_quote(SegmentExpression::MATCH_STARTS_WITH) . '|'
+                . preg_quote(SegmentExpression::MATCH_ENDS_WITH)
+                . '){1}(.*)/';
+            foreach ($excludedRequests as $excludedRequest) {
+                $match = preg_match($pattern, $excludedRequest, $matches);
 
-        $daysSinceFirstVisit = round(($this->getCurrentTimestamp() - $cookieFirstVisitTimestamp) / 86400, $precision = 0);
-
-        if ($daysSinceFirstVisit < 0) {
-            $daysSinceFirstVisit = 0;
-        }
-
-        return $daysSinceFirstVisit;
-    }
-
-    /**
-     * @return bool|float|int
-     */
-    public function getDaysSinceLastOrder()
-    {
-        $daysSinceLastOrder = false;
-        $lastOrderTimestamp = $this->getParam('_ects');
-
-        if ($this->isTimestampValid($lastOrderTimestamp)) {
-            $daysSinceLastOrder = round(($this->getCurrentTimestamp() - $lastOrderTimestamp) / 86400, $precision = 0);
-            if ($daysSinceLastOrder < 0) {
-                $daysSinceLastOrder = 0;
+                if (!empty($match)) {
+                    $leftMember = $matches[1];
+                    $operation = $matches[2];
+                    if (!isset($matches[3])) {
+                        $valueRightMember = '';
+                    } else {
+                        $valueRightMember = urldecode($matches[3]);
+                    }
+                    $actual = Common::getRequestVar($leftMember, '', 'string', $this->params);
+                    $actual = mb_strtolower($actual);
+                    $valueRightMember = mb_strtolower($valueRightMember);
+                    switch ($operation) {
+                        case SegmentExpression::MATCH_EQUAL:
+                            if ($actual === $valueRightMember) {
+                                return true;
+                            }
+                            break;
+                        case SegmentExpression::MATCH_NOT_EQUAL:
+                            if ($actual !== $valueRightMember) {
+                                return true;
+                            }
+                            break;
+                        case SegmentExpression::MATCH_CONTAINS:
+                            if (stripos($actual, $valueRightMember) !== false) {
+                                return true;
+                            }
+                            break;
+                        case SegmentExpression::MATCH_DOES_NOT_CONTAIN:
+                            if (stripos($actual, $valueRightMember) === false) {
+                                return true;
+                            }
+                            break;
+                        case SegmentExpression::MATCH_STARTS_WITH:
+                            if (stripos($actual, $valueRightMember) === 0) {
+                                return true;
+                            }
+                            break;
+                        case SegmentExpression::MATCH_ENDS_WITH:
+                            if (Common::stringEndsWith($actual, $valueRightMember)) {
+                                return true;
+                            }
+                            break;
+                    }
+                }
             }
         }
 
-        return $daysSinceLastOrder;
+        return false;
     }
-
-    /**
-     * @return float|int
-     */
-    public function getDaysSinceLastVisit()
-    {
-        $daysSinceLastVisit = 0;
-        $lastVisitTimestamp = $this->getParam('_viewts');
-
-        if ($this->isTimestampValid($lastVisitTimestamp)) {
-            $daysSinceLastVisit = round(($this->getCurrentTimestamp() - $lastVisitTimestamp) / 86400, $precision = 0);
-            if ($daysSinceLastVisit < 0) {
-                $daysSinceLastVisit = 0;
-            }
-        }
-
-        return $daysSinceLastVisit;
-    }
-
-    /**
-     * @return int|mixed
-     */
-    public function getVisitCount()
-    {
-        $visitCount = $this->getParam('_idvc');
-        if ($visitCount < 1) {
-            $visitCount = 1;
-        }
-        return $visitCount;
-    }
-
     /**
      * Returns the language the visitor is viewing.
      *
@@ -334,10 +367,6 @@ class Request
             '_ref'         => array('', 'string'),
             '_rcn'         => array('', 'string'),
             '_rck'         => array('', 'string'),
-            '_idts'        => array(0, 'int'),
-            '_viewts'      => array(0, 'int'),
-            '_ects'        => array(0, 'int'),
-            '_idvc'        => array(1, 'int'),
             'url'          => array('', 'string'),
             'urlref'       => array('', 'string'),
             'res'          => array(self::UNKNOWN_RESOLUTION, 'string'),
@@ -358,6 +387,12 @@ class Request
             'ec_dt'        => array(false, 'float'),
             'ec_items'     => array('', 'json'),
 
+            // ecommerce product/category view
+            '_pkc'          => array('', 'string'),
+            '_pks'          => array('', 'string'),
+            '_pkn'          => array('', 'string'),
+            '_pkp'          => array(false, 'float'),
+
             // Events
             'e_c'          => array('', 'string'),
             'e_a'          => array('', 'string'),
@@ -367,6 +402,7 @@ class Request
             // some visitor attributes can be overwritten
             'cip'          => array('', 'string'),
             'cdt'          => array('', 'string'),
+            'cdo'          => array('', 'int'),
             'cid'          => array('', 'string'),
             'uid'          => array('', 'string'),
 
@@ -379,13 +415,22 @@ class Request
             'search_cat'   => array('', 'string'),
             'pv_id'        => array('', 'string'),
             'search_count' => array(-1, 'int'),
-            'gt_ms'        => array(-1, 'int'),
+            'pf_net'       => array(-1, 'int'),
+            'pf_srv'       => array(-1, 'int'),
+            'pf_tfr'       => array(-1, 'int'),
+            'pf_dm1'       => array(-1, 'int'),
+            'pf_dm2'       => array(-1, 'int'),
+            'pf_onl'       => array(-1, 'int'),
 
             // Content
             'c_p'          => array('', 'string'),
             'c_n'          => array('', 'string'),
             'c_t'          => array('', 'string'),
             'c_i'          => array('', 'string'),
+
+            // custom action request. Recommended when a plugin declares its own action handler/requestprocessor
+            // refs https://github.com/matomo-org/matomo/issues/16569
+            'ca'          => array(0, 'int'),
         );
 
         if (isset($this->paramsCache[$name])) {
@@ -400,7 +445,7 @@ class Request
         $paramType = $supportedParams[$name][1];
 
         if ($this->hasParam($name)) {
-            $this->paramsCache[$name] = Common::getRequestVar($name, $paramDefaultValue, $paramType, $this->params);
+            $this->paramsCache[$name] = $this->replaceUnsupportedUtf8Chars(Common::getRequestVar($name, $paramDefaultValue, $paramType, $this->params), $name);
         } else {
             $this->paramsCache[$name] = $paramDefaultValue;
         }
@@ -418,7 +463,7 @@ class Request
         }
     }
 
-    private function hasParam($name)
+    public function hasParam($name)
     {
         return isset($this->params[$name]);
     }
@@ -448,11 +493,16 @@ class Request
 
     protected function getCustomTimestamp()
     {
-        if (!$this->hasParam('cdt')) {
+        if (!$this->hasParam('cdt') && !$this->hasParam('cdo')) {
             return false;
         }
 
         $cdt = $this->getParam('cdt');
+        $cdo = $this->getParam('cdo');
+
+        if (empty($cdt) && $cdo) {
+            $cdt = $this->timestamp;
+        }
 
         if (empty($cdt)) {
             return false;
@@ -460,6 +510,10 @@ class Request
 
         if (!is_numeric($cdt)) {
             $cdt = strtotime($cdt);
+        }
+
+        if (!empty($cdo)) {
+            $cdt = $cdt - abs($cdo);
         }
 
         if (!$this->isTimestampValid($cdt, $this->timestamp)) {
@@ -480,7 +534,19 @@ class Request
             }
         }
 
-        return $cdt;
+        $cache = Tracker\Cache::getCacheGeneral();
+        if (!empty($cache['delete_logs_enable']) && !empty($cache['delete_logs_older_than'])) {
+            $scheduleInterval = $cache['delete_logs_schedule_lowest_interval'];
+            $maxLogAge = $cache['delete_logs_older_than'];
+            $logEntryCutoff = time() - (($maxLogAge + $scheduleInterval) * 60 * 60 * 24);
+            if ($cdt < $logEntryCutoff) {
+                $message = "Custom timestamp is older than the configured 'deleted old raw data' value of $maxLogAge days";
+                Common::printDebug($message);
+                throw new InvalidRequestParameterException($message);
+            }
+        }
+
+        return (int) $cdt;
     }
 
     /**
@@ -497,15 +563,15 @@ class Request
         }
 
         return $time <= $now
-            && $time > $now - 10 * 365 * 86400;
+            && $time > $now - 20 * 365 * 86400;
     }
 
-    public function getIdSite()
+    /**
+     * @internal
+     * @ignore
+     */
+    public function getIdSiteUnverified()
     {
-        if (isset($this->idSiteCache)) {
-            return $this->idSiteCache;
-        }
-
         $idSite = Common::getRequestVar('idsite', 0, 'int', $this->params);
 
         /**
@@ -521,8 +587,35 @@ class Request
          *                      request.
          */
         Piwik::postEvent('Tracker.Request.getIdSite', array(&$idSite, $this->params));
+        return $idSite;
+    }
+
+    public function getIdSiteIfExists()
+    {
+        try {
+            return $this->getIdSite();
+        } catch (UnexpectedWebsiteFoundException $ex) {
+            return null;
+        }
+    }
+
+    public function getIdSite()
+    {
+        if (isset($this->idSiteCache)) {
+            return $this->idSiteCache;
+        }
+
+        $idSite = $this->getIdSiteUnverified();
 
         if ($idSite <= 0) {
+            throw new UnexpectedWebsiteFoundException('Invalid idSite: \'' . $idSite . '\'');
+        }
+
+        // check site actually exists, should throw UnexpectedWebsiteFoundException directly
+        $site = Cache::getCacheWebsiteAttributes($idSite);
+
+        if (empty($site)) {
+            // fallback just in case exception wasn't thrown...
             throw new UnexpectedWebsiteFoundException('Invalid idSite: \'' . $idSite . '\'');
         }
 
@@ -542,71 +635,19 @@ class Request
         return Common::getRequestVar('ua', $default, 'string', $this->params);
     }
 
-    public function getCustomVariablesInVisitScope()
+    public function getClientHints(): array
     {
-        return $this->getCustomVariables('visit');
+        // use headers as default if no data was send with the tracking request
+        $default = Http::getClientHintsFromServerVariables();
+
+        $clientHints = Common::getRequestVar('uadata', $default, 'json', $this->params);
+
+        return is_array($clientHints) ? $clientHints : [];
     }
 
-    public function getCustomVariablesInPageScope()
+    public function shouldUseThirdPartyCookie()
     {
-        return $this->getCustomVariables('page');
-    }
-
-    /**
-     * @deprecated since Piwik 2.10.0. Use Request::getCustomVariablesInPageScope() or Request::getCustomVariablesInVisitScope() instead.
-     * When we "remove" this method we will only set visibility to "private" and pass $parameter = _cvar|cvar as an argument instead of $scope
-     */
-    public function getCustomVariables($scope)
-    {
-        if ($scope == 'visit') {
-            $parameter = '_cvar';
-        } else {
-            $parameter = 'cvar';
-        }
-
-        $cvar      = Common::getRequestVar($parameter, '', 'json', $this->params);
-        $customVar = Common::unsanitizeInputValues($cvar);
-
-        if (!is_array($customVar)) {
-            return array();
-        }
-
-        $customVariables = array();
-        $maxCustomVars   = CustomVariables::getNumUsableCustomVariables();
-
-        foreach ($customVar as $id => $keyValue) {
-            $id = (int)$id;
-
-            if ($id < 1
-                || $id > $maxCustomVars
-                || count($keyValue) != 2
-                || (!is_string($keyValue[0]) && !is_numeric($keyValue[0]))
-            ) {
-                Common::printDebug("Invalid custom variables detected (id=$id)");
-                continue;
-            }
-
-            if (strlen($keyValue[1]) == 0) {
-                $keyValue[1] = "";
-            }
-            // We keep in the URL when Custom Variable have empty names
-            // and values, as it means they can be deleted server side
-
-            $customVariables['custom_var_k' . $id] = self::truncateCustomVariable($keyValue[0]);
-            $customVariables['custom_var_v' . $id] = self::truncateCustomVariable($keyValue[1]);
-        }
-
-        return $customVariables;
-    }
-
-    public static function truncateCustomVariable($input)
-    {
-        return substr(trim($input), 0, CustomVariables::getMaxLengthCustomVariables());
-    }
-
-    protected function shouldUseThirdPartyCookie()
-    {
-        return (bool)Config::getInstance()->Tracker['use_third_party_id_cookie'];
+        return TrackerConfig::getConfigValue('use_third_party_id_cookie', $this->getIdSiteIfExists());
     }
 
     public function getThirdPartyCookieVisitorId()
@@ -630,10 +671,19 @@ class Request
             return;
         }
 
+        if (\Piwik\Tracker\IgnoreCookie::isIgnoreCookieFound()) {
+            return;
+        }
+
         $cookie = $this->makeThirdPartyCookieUID();
         $idVisitor = bin2hex($idVisitor);
         $cookie->set(0, $idVisitor);
-        $cookie->save();
+        if (ProxyHttp::isHttps()) {
+            $cookie->setSecure(true);
+            $cookie->save('None');
+        } else {
+            $cookie->save('Lax');
+        }
 
         Common::printDebug(sprintf("We set the visitor ID to %s in the 3rd party cookie...", $idVisitor));
     }
@@ -644,35 +694,35 @@ class Request
             $this->getCookieName(),
             $this->getCookieExpire(),
             $this->getCookiePath());
-       
+
         $domain = $this->getCookieDomain();
         if (!empty($domain)) {
             $cookie->setDomain($domain);
         }
-            
+
         Common::printDebug($cookie);
-        
+
         return $cookie;
     }
 
     protected function getCookieName()
     {
-        return TrackerConfig::getConfigValue('cookie_name');
+        return TrackerConfig::getConfigValue('cookie_name', $this->getIdSiteIfExists());
     }
 
     protected function getCookieExpire()
     {
-        return $this->getCurrentTimestamp() + TrackerConfig::getConfigValue('cookie_expire');
+        return $this->getCurrentTimestamp() + TrackerConfig::getConfigValue('cookie_expire', $this->getIdSiteIfExists());
     }
 
     protected function getCookiePath()
     {
-        return TrackerConfig::getConfigValue('cookie_path');
+        return TrackerConfig::getConfigValue('cookie_path', $this->getIdSiteIfExists());
     }
 
     protected function getCookieDomain()
     {
-        return TrackerConfig::getConfigValue('cookie_domain');
+        return TrackerConfig::getConfigValue('cookie_domain', $this->getIdSiteIfExists());
     }
 
     /**
@@ -687,14 +737,16 @@ class Request
     public function getVisitorId()
     {
         $found = false;
-        
-        // If User ID is set it takes precedence
-        $userId = $this->getForcedUserId();
-        if ($userId) {
-            $userIdHashed = $this->getUserIdHashed($userId);
-            $idVisitor = $this->truncateIdAsVisitorId($userIdHashed);
-            Common::printDebug("Request will be recorded for this user_id = " . $userId . " (idvisitor = $idVisitor)");
-            $found = true;
+
+        if (TrackerConfig::getConfigValue('enable_userid_overwrites_visitorid', $this->getIdSiteIfExists())) {
+            // If User ID is set it takes precedence
+            $userId = $this->getForcedUserId();
+            if ($userId) {
+                $userIdHashed = $this->getUserIdHashed($userId);
+                $idVisitor = $this->truncateIdAsVisitorId($userIdHashed);
+                Common::printDebug("Request will be recorded for this user_id = " . $userId . " (idvisitor = $idVisitor)");
+                $found = true;
+            }
         }
 
         // Was a Visitor ID "forced" (@see Tracking API setVisitorId()) for this request?
@@ -709,21 +761,26 @@ class Request
             }
         }
 
-        // - If set to use 3rd party cookies for Visit ID, read the cookie
-        if (!$found) {
-            $useThirdPartyCookie = $this->shouldUseThirdPartyCookie();
-            if ($useThirdPartyCookie) {
-                $idVisitor = $this->getThirdPartyCookieVisitorId();
-                if(!empty($idVisitor)) {
-                    $found = true;
+        $privacyConfig = new \Piwik\Plugins\PrivacyManager\Config();
+
+        // Only check for cookie values if cookieless tracking is NOT forced
+        if (!$privacyConfig->forceCookielessTracking) {
+            // - If set to use 3rd party cookies for Visit ID, read the cookie
+            if (!$found) {
+                $useThirdPartyCookie = $this->shouldUseThirdPartyCookie();
+                if ($useThirdPartyCookie) {
+                    $idVisitor = $this->getThirdPartyCookieVisitorId();
+                    if (!empty($idVisitor)) {
+                        $found = true;
+                    }
                 }
             }
-        }
 
-        // If a third party cookie was not found, we default to the first party cookie
-        if (!$found) {
-            $idVisitor = Common::getRequestVar('_id', '', 'string', $this->params);
-            $found = strlen($idVisitor) >= Tracker::LENGTH_HEX_ID_STRING;
+            // If a third party cookie was not found, we default to the first party cookie
+            if (!$found) {
+                $idVisitor = Common::getRequestVar('_id', '', 'string', $this->params);
+                $found     = strlen($idVisitor) >= Tracker::LENGTH_HEX_ID_STRING;
+            }
         }
 
         if ($found) {
@@ -788,7 +845,7 @@ class Request
 
     public function getPlugins()
     {
-        static $pluginsInOrder = array('fla', 'java', 'dir', 'qt', 'realp', 'pdf', 'wma', 'gears', 'ag', 'cookie');
+        static $pluginsInOrder = array('fla', 'java', 'qt', 'realp', 'pdf', 'wma', 'ag', 'cookie');
         $plugins = array();
         foreach ($pluginsInOrder as $param) {
             $plugins[] = Common::getRequestVar($param, 0, 'int', $this->params);
@@ -801,20 +858,6 @@ class Request
         return $this->isEmptyRequest;
     }
 
-    const GENERATION_TIME_MS_MAXIMUM = 3600000; // 1 hour
-
-    public function getPageGenerationTime()
-    {
-        $generationTime = $this->getParam('gt_ms');
-        if ($generationTime > 0
-            && $generationTime < self::GENERATION_TIME_MS_MAXIMUM
-        ) {
-            return (int)$generationTime;
-        }
-
-        return false;
-    }
-
     /**
      * @param $idVisitor
      * @return string
@@ -825,7 +868,7 @@ class Request
     }
 
     /**
-     * Matches implementation of PiwikTracker::getUserIdHashed
+     * Matches implementation of MatomoTracker::getUserIdHashed
      *
      * @param $userId
      * @return string
@@ -849,7 +892,7 @@ class Request
 
         if (!$this->isAuthenticated()) {
             Common::printDebug("WARN: Tracker API 'cip' was used with invalid token_auth");
-            return IP::getIpFromHeader();
+            throw new InvalidRequestParameterException("Tracker API 'cip' was used, requires valid token_auth");
         }
 
         return $cip;

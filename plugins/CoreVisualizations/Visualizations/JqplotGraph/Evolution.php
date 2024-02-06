@@ -1,19 +1,23 @@
 <?php
+
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 
 namespace Piwik\Plugins\CoreVisualizations\Visualizations\JqplotGraph;
 
+use Piwik\API\Request as ApiRequest;
 use Piwik\Common;
-use Piwik\DataTable;
+use Piwik\Container\StaticContainer;
+use Piwik\Period\Factory;
 use Piwik\Period\Range;
 use Piwik\Plugins\CoreVisualizations\JqplotDataGenerator;
 use Piwik\Plugins\CoreVisualizations\Visualizations\JqplotGraph;
+use Piwik\Plugins\CoreVisualizations\Visualizations\EvolutionPeriodSelector;
 use Piwik\Site;
 
 /**
@@ -35,23 +39,59 @@ class Evolution extends JqplotGraph
     {
         parent::beforeRender();
 
+        $this->checkRequestIsOnlyForMultiplePeriods();
+
+        $this->config->show_flatten_table = false;
         $this->config->datatable_js_type = 'JqplotEvolutionGraphDataTable';
     }
 
     public function beforeLoadDataTable()
     {
-        $this->calculateEvolutionDateRange();
+        if (!$this->isComparing()) {
+            $this->calculateEvolutionDateRange();
+        }
 
         parent::beforeLoadDataTable();
 
-        // period will be overridden when 'range' is requested in the UI
-        // but the graph will display for each day of the range.
-        // Default 'range' behavior is to return the 'sum' for the range
-        if (Common::getRequestVar('period', false) == 'range') {
-            $this->requestConfig->request_parameters_to_modify['period'] = 'day';
+        // period will be overridden when 'range' is requested in the UI.
+        // The graph will display the range in the most suitable period and
+        // it won't show historical data before the range.
+        $period = Common::getRequestVar('period', false);
+        $selector = StaticContainer::get(EvolutionPeriodSelector::class);
+
+        if ($period === 'range') {
+            $date = Common::getRequestVar('date', false);
+            $requestingPeriod = Factory::build($period, $date);
+
+            // if a larger date range is selected, then for better performance and for seeing trends better we want to use
+            // a suitable period (rather than always using for example the day range)
+            $this->requestConfig->request_parameters_to_modify['period'] = $selector->getHighestPeriodInCommon($requestingPeriod, []);
+            $this->requestConfig->request_parameters_to_modify['date'] = $requestingPeriod->getRangeString();
         }
 
         $this->config->custom_parameters['columns'] = $this->config->columns_to_display;
+
+        if ($this->isComparing()) {
+            $this->config->show_limit_control = false; // since we always show the evolution over the period, there's no point in changing the limit
+            $this->config->show_periods = false; // the periods can't be changed as they are always fixed when comparing
+
+            $requestArray = $this->request->getRequestArray();
+            $requestArray = ApiRequest::getRequestArrayFromString($requestArray);
+
+            $requestingPeriod = Factory::build($requestArray['period'], $requestArray['date']);
+
+            $comparisonPeriods = [];
+            if (!empty($requestArray['comparePeriods'])) {
+                $comparisonPeriods = $selector->getComparisonPeriodObjects($requestArray['comparePeriods'], $requestArray['compareDates']);
+            }
+
+            $this->requestConfig->request_parameters_to_modify = $selector->setDatePeriods(
+                $this->requestConfig->request_parameters_to_modify,
+                $requestingPeriod,
+                $comparisonPeriods,
+                true
+            );
+        }
     }
 
     public function afterAllFiltersAreApplied()
@@ -67,7 +107,7 @@ class Evolution extends JqplotGraph
 
     protected function makeDataGenerator($properties)
     {
-        return JqplotDataGenerator::factory('evolution', $properties);
+        return JqplotDataGenerator::factory('evolution', $properties, $this);
     }
 
     /**
@@ -77,30 +117,28 @@ class Evolution extends JqplotGraph
     private function calculateEvolutionDateRange()
     {
         $period = Common::getRequestVar('period');
+        $idSite = Common::getRequestVar('idSite');
+        $timezone = Site::getTimezoneFor($idSite);
 
-        $defaultLastN = self::getDefaultLastN($period);
+        $lastNParamName = self::getLastNParamName($period);
+        $defaultLastN = $this->config->custom_parameters[$lastNParamName] ?? self::getDefaultLastN($period);
         $originalDate = Common::getRequestVar('date', 'last' . $defaultLastN, 'string');
 
         if ('range' != $period) { // show evolution limit if the period is not a range
-            $this->config->show_limit_control = true;
-
             // set the evolution_{$period}_last_n query param
             if (Range::parseDateRange($originalDate)) {
                 // if a multiple period
 
                 // overwrite last_n param using the date range
-                $oPeriod = new Range($period, $originalDate);
+                $oPeriod = new Range($period, $originalDate, $timezone);
                 $lastN   = count($oPeriod->getSubperiods());
-
             } else {
-
                 // if not a multiple period
                 list($newDate, $lastN) = self::getDateRangeAndLastN($period, $originalDate, $defaultLastN);
                 $this->requestConfig->request_parameters_to_modify['date'] = $newDate;
                 $this->config->custom_parameters['dateUsedInGraph'] = $newDate;
             }
 
-            $lastNParamName = self::getLastNParamName($period);
             $this->config->custom_parameters[$lastNParamName] = $lastN;
         }
     }
@@ -196,5 +234,20 @@ class Evolution extends JqplotGraph
         $paddedCount = $countGraphElements + 2; // pad count so last label won't be cut off
 
         return ceil($paddedCount / $steps);
+    }
+
+    public function supportsComparison()
+    {
+        return true;
+    }
+
+    protected function ensureValidColumnsToDisplay()
+    {
+        parent::ensureValidColumnsToDisplay();
+
+        $columnsToDisplay = $this->config->columns_to_display;
+
+        // Use a sensible default if the columns_to_display is empty
+        $this->config->columns_to_display = $columnsToDisplay ? : array('nb_visits');
     }
 }

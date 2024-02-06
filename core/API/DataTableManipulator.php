@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -15,6 +15,7 @@ use Piwik\DataTable\Row;
 use Piwik\DataTable;
 use Piwik\Period\Range;
 use Piwik\Plugins\API\API;
+use Piwik\Url;
 
 /**
  * Base class for manipulating data tables.
@@ -33,8 +34,7 @@ abstract class DataTableManipulator
     protected $apiModule;
     protected $apiMethod;
     protected $request;
-
-    private $apiMethodForSubtable;
+    protected $apiMethodForSubtable;
 
     /**
      * Constructor
@@ -144,7 +144,7 @@ abstract class DataTableManipulator
      * @throws Exception
      * @return string
      */
-    private function getApiMethodForSubtable($request)
+    protected function getApiMethodForSubtable($request)
     {
         if (!$this->apiMethodForSubtable) {
             if (!empty($request['idSite'])) {
@@ -170,8 +170,9 @@ abstract class DataTableManipulator
 
             if (empty($meta)) {
                 throw new Exception(sprintf(
-                    "The DataTable cannot be manipulated: Metadata for report %s.%s could not be found. You can define the metadata in a hook, see example at: https://developer.matomo.org/api-reference/events#apigetreportmetadata",
-                    $this->apiModule, $this->apiMethod
+                    "The DataTable cannot be manipulated: Metadata for report %s.%s could not be found. You can define the metadata in a hook, see example at: %s",
+                    $this->apiModule, $this->apiMethod,
+                    Url::addCampaignParametersToMatomoLink('https://developer.matomo.org/api-reference/events#apigetreportmetadata')
                 ));
             }
 
@@ -193,6 +194,7 @@ abstract class DataTableManipulator
         $request['expanded'] = 0;
         $request['format'] = 'original';
         $request['format_metrics'] = 0;
+        $request['compare'] = 0;
 
         // don't want to run recursive filters on the subtables as they are loaded,
         // otherwise the result will be empty in places (or everywhere). instead we
@@ -203,6 +205,15 @@ abstract class DataTableManipulator
         $response = new ResponseBuilder($format = 'original', $request);
         $response->disableSendHeader();
         $dataTable = $response->getResponse($dataTable, $apiModule, $method);
+
+        // save API method name so it can be used by filters
+        if ($dataTable instanceof DataTable\DataTableInterface) {
+            $dataTable->filter(function (DataTable $table) use ($apiModule, $method) {
+                $table->setMetadata('apiModule', $apiModule);
+                $table->setMetadata('apiMethod', $method);
+            });
+        }
+
         return $dataTable;
     }
 }

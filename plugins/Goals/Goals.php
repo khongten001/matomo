@@ -1,22 +1,25 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
 namespace Piwik\Plugins\Goals;
 
+use Piwik\API\Request;
 use Piwik\Columns\ComputedMetricFactory;
 use Piwik\Columns\Dimension;
 use Piwik\Columns\MetricsList;
 use Piwik\Common;
+use Piwik\DataTable\Filter\AddColumnsProcessedMetricsGoal;
 use Piwik\Piwik;
 use Piwik\Plugin\ArchivedMetric;
 use Piwik\Plugin\ComputedMetric;
 use Piwik\Plugin\ReportsProvider;
 use Piwik\Plugins\CoreHome\SystemSummary;
+use Piwik\Plugins\Goals\RecordBuilders\ProductRecord;
 use Piwik\Tracker\GoalManager;
 use Piwik\Category\Subcategory;
 
@@ -42,6 +45,23 @@ class Goals extends \Piwik\Plugin
         }
 
         return $dimensionsByGroup;
+    }
+
+    public static function getGoalIdFromGoalColumn($columnName)
+    {
+        if (strpos($columnName, 'goal_') === 0) {
+            $column = str_replace(array('goal_'), '', $columnName);
+            return (int) $column;
+        }
+    }
+
+    public static function makeGoalColumn($idGoal, $column, $forceInt = true)
+    {
+        if ($forceInt) { // in non-archiver code idGoal can be, eg, ecommerceOrder
+            $idGoal = (int) $idGoal;
+        }
+
+        return 'goal_' . $idGoal . '_' . $column;
     }
 
     public static function getGoalColumns($idGoal)
@@ -76,19 +96,32 @@ class Goals extends \Piwik\Plugin
     public function registerEvents()
     {
         $hooks = array(
-            'AssetManager.getJavaScriptFiles'        => 'getJsFiles',
             'AssetManager.getStylesheetFiles'        => 'getStylesheetFiles',
             'Tracker.Cache.getSiteAttributes'        => 'fetchGoalsFromDb',
             'API.getReportMetadata.end'              => 'getReportMetadataEnd',
             'SitesManager.deleteSite.end'            => 'deleteSiteGoals',
             'Translate.getClientSideTranslationKeys' => 'getClientSideTranslationKeys',
             'Metrics.getDefaultMetricTranslations'   => 'addMetricTranslations',
+            'Metrics.getDefaultMetricSemanticTypes'  => 'addMetricSemanticTypes',
             'Category.addSubcategories'              => 'addSubcategories',
             'Metric.addMetrics'                      => 'addMetrics',
             'Metric.addComputedMetrics'              => 'addComputedMetrics',
             'System.addSystemSummaryItems'           => 'addSystemSummaryItems',
+            'Archiver.addRecordBuilders'             => 'addRecordBuilders',
         );
         return $hooks;
+    }
+
+    public function addRecordBuilders(array &$recordBuilders): void
+    {
+        $recordBuilders[] = new ProductRecord(ProductRecord::SKU_FIELD, ProductRecord::ITEMS_SKU_RECORD_NAME);
+        $recordBuilders[] = new ProductRecord(ProductRecord::NAME_FIELD, ProductRecord::ITEMS_NAME_RECORD_NAME);
+        $recordBuilders[] = new ProductRecord(ProductRecord::CATEGORY_FIELD, ProductRecord::ITEMS_CATEGORY_RECORD_NAME, [
+            ProductRecord::CATEGORY2_FIELD,
+            ProductRecord::CATEGORY3_FIELD,
+            ProductRecord::CATEGORY4_FIELD,
+            ProductRecord::CATEGORY5_FIELD,
+        ]);
     }
 
     public function addSystemSummaryItems(&$systemSummary)
@@ -102,7 +135,7 @@ class Goals extends \Piwik\Plugin
     public function addComputedMetrics(MetricsList $list, ComputedMetricFactory $computedMetricFactory)
     {
         $idSite = Common::getRequestVar('idSite', 0, 'int');
-        $goals = API::getInstance()->getGoals($idSite);
+        $goals = Request::processRequest('Goals.getGoals', ['idSite' => $idSite, 'filter_limit' => '-1'], $default = []);
 
         foreach ($goals as $goal) {
             $metric = $computedMetricFactory->createComputedMetric('goal_' .  $goal['idgoal'] . '_conversion', 'nb_uniq_visitors', ComputedMetric::AGGREGATION_RATE);
@@ -116,10 +149,10 @@ class Goals extends \Piwik\Plugin
     public function addMetrics(MetricsList $metricsList)
     {
         $idSite = Common::getRequestVar('idSite', 0, 'int');
-        $goals = API::getInstance()->getGoals($idSite);
+        $goals = Request::processRequest('Goals.getGoals', ['idSite' => $idSite, 'filter_limit' => '-1'], $default = []);
 
         foreach ($goals as $goal) {
-            $custom = new GoalDimension($goal, 'idgoal', 'Conversions goal "' . $goal['name'] . '" (ID ' . $goal['idgoal'] .' )');
+            $custom = new GoalDimension($goal, 'idgoal', 'Conversions goal "' . $goal['name'] . '" (ID ' . $goal['idgoal'] . ' )');
             $custom->setType(Dimension::TYPE_NUMBER);
             $custom->setSqlSegment('count(distinct log_conversion.idvisit, log_conversion.buster)');
 
@@ -131,7 +164,7 @@ class Goals extends \Piwik\Plugin
             $metric->setName('goal_' . $goal['idgoal'] . '_conversion');
             $metricsList->addMetric($metric);
 
-            $custom = new GoalDimension($goal, 'revenue', 'Revenue goal "' . $goal['name'] . '" (ID ' . $goal['idgoal'] .' )');
+            $custom = new GoalDimension($goal, 'revenue', 'Revenue goal "' . $goal['name'] . '" (ID ' . $goal['idgoal'] . ' )');
             $custom->setType(Dimension::TYPE_MONEY);
             $metric = new ArchivedMetric($custom, ArchivedMetric::AGGREGATION_SUM);
             $metric->setTranslatedName($custom->getName());
@@ -140,16 +173,17 @@ class Goals extends \Piwik\Plugin
             $metric->setCategory($custom->getCategoryId());
             $metricsList->addMetric($metric);
 
-            $custom = new GoalDimension($goal, 'visitor_days_since_first', 'Days to conversion goal "' . $goal['name'] . '" (ID ' . $goal['idgoal'] .' )');
+            $custom = new GoalDimension($goal, 'visitor_seconds_since_first', 'Days to conversion goal "' . $goal['name'] . '" (ID ' . $goal['idgoal'] . ' )');
             $custom->setType(Dimension::TYPE_NUMBER);
             $metric = new ArchivedMetric($custom, ArchivedMetric::AGGREGATION_SUM);
             $metric->setTranslatedName($custom->getName());
             $metric->setCategory($custom->getCategoryId());
             $metric->setDocumentation('The number of days it took a visitor to convert this goal.');
             $metric->setName('goal_' . $goal['idgoal'] . '_daystoconversion');
+            $metric->setQuery('sum(floor(log_visit.visitor_seconds_since_first / 86400))');
             $metricsList->addMetric($metric);
 
-            $custom = new GoalDimension($goal, 'visitor_count_visits', 'Visits to conversion goal "' . $goal['name'] . '" (ID ' . $goal['idgoal'] .' )');
+            $custom = new GoalDimension($goal, 'visitor_count_visits', 'Visits to conversion goal "' . $goal['name'] . '" (ID ' . $goal['idgoal'] . ' )');
             $custom->setType(Dimension::TYPE_NUMBER);
             $metric = new ArchivedMetric($custom, ArchivedMetric::AGGREGATION_SUM);
             $metric->setTranslatedName($custom->getName());
@@ -173,7 +207,7 @@ class Goals extends \Piwik\Plugin
             }
         }
 
-        $goals = API::getInstance()->getGoals($idSite);
+        $goals = Request::processRequest('Goals.getGoals', ['idSite' => $idSite, 'filter_limit' => '-1'], $default = []);
 
         $order = 900;
         foreach ($goals as $goal) {
@@ -207,6 +241,23 @@ class Goals extends \Piwik\Plugin
         $translations = array_merge($translations, $metrics);
     }
 
+    public function addMetricSemanticTypes(array &$types): void
+    {
+        $goalMetricTypes = array(
+            'orders'            => Dimension::TYPE_NUMBER,
+            'ecommerce_revenue' => Dimension::TYPE_MONEY,
+            'quantity'          => Dimension::TYPE_NUMBER,
+            'revenue_subtotal'  => Dimension::TYPE_MONEY,
+            'revenue_tax'       => Dimension::TYPE_MONEY,
+            'revenue_shipping'  => Dimension::TYPE_MONEY,
+            'revenue_discount'  => Dimension::TYPE_MONEY,
+            'avg_order_revenue' => Dimension::TYPE_MONEY,
+            'items'             => Dimension::TYPE_NUMBER,
+        );
+
+        $types = array_merge($types, $goalMetricTypes);
+    }
+
     /**
      * Delete goals recorded for this site
      */
@@ -238,17 +289,99 @@ class Goals extends \Piwik\Plugin
             'revenue'         => Piwik::translate('General_ColumnRevenue')
         );
 
+        $goalMetricTypes = [
+            'revenue_per_visit' => Dimension::TYPE_MONEY,
+            'nb_conversions' => Dimension::TYPE_NUMBER,
+            'conversion_rate' => Dimension::TYPE_PERCENT,
+            'revenue' => Dimension::TYPE_MONEY,
+        ];
+
+        // special goal metrics for Actions page reports
+        $pageGoalMetrics = array_merge($goalMetrics, [
+            'nb_conversions_attrib' => Piwik::translate('Goals_ColumnConversions'),
+            'revenue_attrib' => Piwik::translate('General_ColumnRevenue'),
+        ]);
+        unset($pageGoalMetrics['revenue']);
+
+        $pageGoalProcessedMetrics = array_merge($goalProcessedMetrics, [
+            'nb_conversions_page_rate' => Piwik::translate('Goals_ConversionRatePageViewedBeforeGeneric'),
+        ]);
+
+        $pageGoalMetricTypes = array_merge($goalMetricTypes, [
+            'nb_conversions_attrib' => Dimension::TYPE_NUMBER,
+            'revenue_attrib' => Dimension::TYPE_MONEY,
+            'nb_conversions_page_rate' => Dimension::TYPE_PERCENT,
+        ]);
+        unset($pageGoalMetricTypes['revenue']);
+
+        // special goal metrics for Actions entry page reports
+        $entryPageGoalMetrics = array_merge($goalMetrics, [
+            'nb_conversions_entry' => Piwik::translate('Goals_ColumnConversions'),
+            'revenue_entry' => Piwik::translate('General_ColumnRevenue'),
+        ]);
+        unset($entryPageGoalMetrics['revenue']);
+
+        $entryPageGoalProcessedMetrics = array_merge($goalProcessedMetrics, [
+            'revenue_per_entry' => Piwik::translate('General_ColumnValuePerEntry'),
+            'nb_conversions_entry_rate' => Piwik::translate('General_ColumnConversionRate'),
+        ]);
+
+        $entryPageGoalMetricTypes = array_merge($goalMetricTypes, [
+            'nb_conversions_entry' => Dimension::TYPE_NUMBER,
+            'revenue_entry' => Dimension::TYPE_MONEY,
+            'revenue_per_entry' => Dimension::TYPE_NUMBER,
+            'nb_conversions_entry_rate' => Dimension::TYPE_PERCENT,
+        ]);
+        unset($entryPageGoalMetricTypes['revenue']);
+
+        // add ecommerce metrics if idGoal is an ecommerce goal
+        $idGoal = \Piwik\Request::fromRequest()->getParameter('idGoal', '');
+        if ($idGoal === Piwik::LABEL_ID_GOAL_IS_ECOMMERCE_ORDER || $idGoal === Piwik::LABEL_ID_GOAL_IS_ECOMMERCE_CART) {
+            $extraEcommerceProcessedMetrics = [
+                'avg_order_revenue' => Piwik::translate('General_AverageOrderValue'),
+                'items' => Piwik::translate('General_PurchasedProducts'),
+            ];
+
+            $extraEcommerceMetricTypes = [
+                'avg_order_revenue' => Dimension::TYPE_MONEY,
+                'itmes' => Dimension::TYPE_NUMBER,
+            ];
+
+            $pageGoalProcessedMetrics = array_merge($pageGoalProcessedMetrics, $extraEcommerceProcessedMetrics);
+            $entryPageGoalProcessedMetrics = array_merge($entryPageGoalProcessedMetrics, $extraEcommerceProcessedMetrics);
+
+            $pageGoalMetricTypes = array_merge($pageGoalMetricTypes, $extraEcommerceMetricTypes);
+            $entryPageGoalMetricTypes = array_merge($entryPageGoalMetricTypes, $extraEcommerceMetricTypes);
+        }
+
         $reportsWithGoals = self::getAllReportsWithGoalMetrics();
 
         foreach ($reportsWithGoals as $reportWithGoals) {
+            $goalMetricsToUse = $goalMetrics;
+            $goalProcessedMetricsToUse = $goalProcessedMetrics;
+            $goalMetricTypesToUse = $goalMetricTypes;
+
+            $request = $reportWithGoals['module'] . '.' . $reportWithGoals['action'];
+            if (in_array($request, AddColumnsProcessedMetricsGoal::ACTIONS_PAGE_REPORTS_WITH_GOAL_METRICS)) {
+                $goalMetricsToUse = $pageGoalMetrics;
+                $goalProcessedMetricsToUse = $pageGoalProcessedMetrics;
+                $goalMetricTypesToUse = $pageGoalMetricTypes;
+            } else if (in_array($request, AddColumnsProcessedMetricsGoal::ACTIONS_ENTRY_PAGE_REPORTS_WITH_GOAL_METRICS)) {
+                $goalMetricsToUse = $entryPageGoalMetrics;
+                $goalProcessedMetricsToUse = $entryPageGoalProcessedMetrics;
+                $goalMetricTypesToUse = $entryPageGoalMetricTypes;
+            }
+
             // Select this report from the API metadata array
             // and add the Goal metrics to it
             foreach ($reports as &$apiReportToUpdate) {
                 if ($apiReportToUpdate['module'] == $reportWithGoals['module']
                     && $apiReportToUpdate['action'] == $reportWithGoals['action']
-                    && empty($apiReportToUpdate['parameters'])) {
-                    $apiReportToUpdate['metricsGoal'] = $goalMetrics;
-                    $apiReportToUpdate['processedMetricsGoal'] = $goalProcessedMetrics;
+                    && empty($apiReportToUpdate['parameters'])
+                ) {
+                    $apiReportToUpdate['metricsGoal'] = $goalMetricsToUse;
+                    $apiReportToUpdate['processedMetricsGoal'] = $goalProcessedMetricsToUse;
+                    $apiReportToUpdate['metricTypesGoal'] = $goalMetricTypesToUse;
                     break;
                 }
             }
@@ -262,7 +395,7 @@ class Goals extends \Piwik\Plugin
         $reports = new ReportsProvider();
 
         foreach ($reports->getAllReports() as $report) {
-            if ($report->hasGoalMetrics()) {
+            if ($report->hasGoalMetrics() && $report->isEnabled()) {
                 $reportsWithGoals[] = array(
                     'category' => $report->getCategoryId(),
                     'name'     => $report->getName(),
@@ -321,16 +454,9 @@ class Goals extends \Piwik\Plugin
         return $reportsWithGoals;
     }
 
-    public function getJsFiles(&$jsFiles)
-    {
-        $jsFiles[] = "plugins/Goals/angularjs/common/directives/goal-page-link.js";
-        $jsFiles[] = "plugins/Goals/angularjs/manage-goals/manage-goals.controller.js";
-        $jsFiles[] = "plugins/Goals/angularjs/manage-goals/manage-goals.directive.js";
-    }
-
     public function getStylesheetFiles(&$stylesheets)
     {
-        $stylesheets[] = "plugins/Goals/stylesheets/goals.css";
+        $stylesheets[] = "plugins/Goals/stylesheets/goals.less";
     }
 
     public function fetchGoalsFromDb(&$array, $idSite)
@@ -345,9 +471,60 @@ class Goals extends \Piwik\Plugin
         $translationKeys[] = 'Goals_AddNewGoal';
         $translationKeys[] = 'Goals_UpdateGoal';
         $translationKeys[] = 'Goals_DeleteGoalConfirm';
-        $translationKeys[] = 'Goals_UpdateGoal';
-        $translationKeys[] = 'Goals_DeleteGoalConfirm';
         $translationKeys[] = 'Goals_Ecommerce';
         $translationKeys[] = 'Goals_Optional';
+        $translationKeys[] = 'Goals_TimeInMinutes';
+        $translationKeys[] = 'Goals_Pattern';
+        $translationKeys[] = 'Goals_ClickToViewThisGoal';
+        $translationKeys[] = 'Goals_ManageGoals';
+        $translationKeys[] = 'Goals_GoalName';
+        $translationKeys[] = 'Goals_GoalIsTriggeredWhen';
+        $translationKeys[] = 'Goals_ThereIsNoGoalToManage';
+        $translationKeys[] = 'Goals_ManuallyTriggeredUsingJavascriptFunction';
+        $translationKeys[] = 'Goals_VisitUrl';
+        $translationKeys[] = 'Goals_ClickOutlink';
+        $translationKeys[] = 'Goals_SendEvent';
+        $translationKeys[] = 'Goals_GoalIsTriggered';
+        $translationKeys[] = 'Goals_WhereThe';
+        $translationKeys[] = 'Goals_URL';
+        $translationKeys[] = 'Goals_Contains';
+        $translationKeys[] = 'Goals_IsExactly';
+        $translationKeys[] = 'Goals_MatchesExpression';
+        $translationKeys[] = 'Goals_AllowMultipleConversionsPerVisit';
+        $translationKeys[] = 'Goals_HelpOneConversionPerVisit';
+        $translationKeys[] = 'Goals_DefaultRevenueHelp';
+        $translationKeys[] = 'Goals_DefaultRevenueLabel';
+        $translationKeys[] = 'Goals_GoalRevenue';
+        $translationKeys[] = 'Goals_Filename';
+        $translationKeys[] = 'Goals_ExternalWebsiteUrl';
+        $translationKeys[] = 'Goals_VisitDuration';
+        $translationKeys[] = 'Goals_AtLeastMinutes';
+        $translationKeys[] = 'Goals_VisitPageTitle';
+        $translationKeys[] = 'Intl_NMinutes';
+        $translationKeys[] = 'Goals_PageTitle';
+        $translationKeys[] = 'Goals_UseEventValueAsRevenue';
+        $translationKeys[] = 'Goals_EventValueAsRevenueHelp';
+        $translationKeys[] = 'Goals_EventValueAsRevenueHelp2';
+        $translationKeys[] = 'Events_EventCategory';
+        $translationKeys[] = 'Goals_WhereVisitedPageManuallyCallsJavascriptTrackerLearnMore';
+        $translationKeys[] = 'Goals_LearnMoreAboutGoalTrackingDocumentation';
+        $translationKeys[] = 'Goals_EcommerceReports';
+        $translationKeys[] = 'SitesManager_WebsitesManagement';
+        $translationKeys[] = 'Goals_CaseSensitive';
+        $translationKeys[] = 'Goals_Download';
+        $translationKeys[] = 'Events_EventAction';
+        $translationKeys[] = 'Events_EventName';
+        $translationKeys[] = 'Goals_YouCanEnableEcommerceReports';
+        $translationKeys[] = 'Goals_CategoryTextGeneral_Actions';
+        $translationKeys[] = 'General_ForExampleShort';
+        $translationKeys[] = 'General_Id';
+        $translationKeys[] = 'General_Description';
+        $translationKeys[] = 'General_ColumnRevenue';
+        $translationKeys[] = 'General_Edit';
+        $translationKeys[] = 'General_Delete';
+        $translationKeys[] = 'General_OperationGreaterThan';
+        $translationKeys[] = 'General_Yes';
+        $translationKeys[] = 'General_No';
+        $translationKeys[] = 'General_OrCancel';
     }
 }

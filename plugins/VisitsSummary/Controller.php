@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -11,13 +11,13 @@ namespace Piwik\Plugins\VisitsSummary;
 use Piwik\API\Request;
 use Piwik\Common;
 use Piwik\DataTable;
-use Piwik\DataTable\Row;
 use Piwik\FrontController;
 use Piwik\Piwik;
 use Piwik\Plugins\CoreVisualizations\Visualizations\Sparklines;
+use Piwik\SettingsPiwik;
 use Piwik\Site;
 use Piwik\Translation\Translator;
-use Piwik\View;
+use Piwik\Url;
 
 /**
  *
@@ -39,6 +39,16 @@ class Controller extends \Piwik\Plugin\Controller
     /**
      * @deprecated used to be a widgetized URL. There to not break widget URLs
      */
+    public function index()
+    {
+        $_GET['containerId'] = 'VisitOverviewWithGraph';
+
+        return FrontController::getInstance()->fetchDispatch('CoreHome', 'renderWidgetContainer');
+    }
+
+    /**
+     * @deprecated used to be a widgetized URL. There to not break widget URLs
+     */
     public function getSparklines()
     {
         $_GET['forceView'] = '1';
@@ -47,18 +57,9 @@ class Controller extends \Piwik\Plugin\Controller
         return FrontController::getInstance()->fetchDispatch('VisitsSummary', 'get');
     }
 
-    /**
-     * @deprecated used to be a widgetized URL. There to not break widget URLs
-     */
-    public function index()
-    {
-        $_GET['containerId'] = 'VisitOverviewWithGraph';
-
-        return FrontController::getInstance()->fetchDispatch('CoreHome', 'renderWidgetContainer');
-    }
-
     public function getEvolutionGraph()
     {
+        $this->checkSitePermission();
         $columns = Common::getRequestVar('columns', false);
         if (false !== $columns) {
             $columns = Piwik::getArrayFromApiParameter($columns);
@@ -77,7 +78,7 @@ class Controller extends \Piwik\Plugin\Controller
             . $this->translator->translate('General_ColumnNbActionsDocumentation') . '<br />'
 
             . '<b>' . $this->translator->translate('General_ColumnNbUsers') . ':</b> '
-            . $this->translator->translate('General_ColumnNbUsersDocumentation') . ' (<a rel="noreferrer noopener" target="_blank" href="https://matomo.org/docs/user-id/">User ID</a>)<br />'
+            . $this->translator->translate('General_ColumnNbUsersDocumentation') . ' (<a rel="noreferrer noopener" target="_blank" href="' . Url::addCampaignParametersToMatomoLink('https://matomo.org/docs/user-id/') . '">User ID</a>)<br />'
 
             . '<b>' . $this->translator->translate('General_ColumnActionsPerVisit') . ':</b> '
             . $this->translator->translate('General_ColumnActionsPerVisitDocumentation');
@@ -102,8 +103,13 @@ class Controller extends \Piwik\Plugin\Controller
             'avg_time_generation'
         );
 
-        $idSite = Common::getRequestVar('idSite');
-        $displaySiteSearch = Site::isSiteSearchEnabledFor($idSite);
+        $currentPeriod = Common::getRequestVar('period', false);
+
+        if (!SettingsPiwik::isUniqueVisitorsEnabled($currentPeriod)) {
+            $selectableColumns = array_diff($selectableColumns, ['nb_uniq_visitors', 'nb_users']);
+        }
+
+        $displaySiteSearch = Site::isSiteSearchEnabledFor($this->idSite);
 
         if ($displaySiteSearch) {
             $selectableColumns[] = 'nb_searches';

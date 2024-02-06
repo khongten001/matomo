@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -14,26 +14,29 @@ use Piwik\DataTable;
 use Piwik\DataTable\Renderer\Json;
 use Piwik\DataTable\Filter\AddColumnsProcessedMetricsGoal;
 use Piwik\FrontController;
+use Piwik\Metrics\Formatter;
+use Piwik\NumberFormatter;
 use Piwik\Piwik;
+use Piwik\Plugin\Manager;
+use Piwik\Plugins\CoreVisualizations\Visualizations\Sparklines;
+use Piwik\Plugins\Live\Live;
 use Piwik\Plugins\Referrers\API as APIReferrers;
+use Piwik\Site;
 use Piwik\Translation\Translator;
 use Piwik\View;
+use Piwik\ViewDataTable\Factory as ViewDataTableFactory;
+use Piwik\Plugins\CoreVisualizations\Visualizations\jqplotGraph\Evolution;
 
 /**
  *
  */
 class Controller extends \Piwik\Plugin\Controller
 {
-    const CONVERSION_RATE_PRECISION = 1;
-
     /**
      * Number of "Your top converting keywords/etc are" to display in the per Goal overview page
      * @var int
      */
     const COUNT_TOP_ROWS_TO_DISPLAY = 3;
-
-    const ECOMMERCE_LOG_SHOW_ORDERS = 1;
-    const ECOMMERCE_LOG_SHOW_ABANDONED_CARTS = 2;
 
     protected $goalColumnNameToLabel = array(
         'avg_order_revenue' => 'General_AverageOrderValue',
@@ -59,10 +62,6 @@ class Controller extends \Piwik\Plugin\Controller
             }
         }
 
-        if (!is_numeric($conversionRate)) {
-            $conversionRate = sprintf('%.' . self::CONVERSION_RATE_PRECISION . 'f%%', $conversionRate);
-        }
-
         return $conversionRate;
     }
 
@@ -72,8 +71,7 @@ class Controller extends \Piwik\Plugin\Controller
 
         $this->translator = $translator;
 
-        $this->idSite = Common::getRequestVar('idSite', null, 'int');
-        $this->goals = API::getInstance()->getGoals($this->idSite);
+        $this->goals = Request::processRequest('Goals.getGoals', ['idSite' => $this->idSite, 'filter_limit' => '-1'], $default = []);
     }
 
     public function manage()
@@ -84,6 +82,7 @@ class Controller extends \Piwik\Plugin\Controller
         $this->setGeneralVariablesView($view);
         $this->setEditGoalsViewVariables($view);
         $this->setGoalOptions($view);
+        $this->execAndSetResultsForTwigEvents($view);
         return $view->render();
     }
 
@@ -100,6 +99,7 @@ class Controller extends \Piwik\Plugin\Controller
         $view->conversion_rate_returning = $this->formatConversionRate($goalMetrics, 'conversion_rate_returning_visit');
         $view->conversion_rate_new = $this->formatConversionRate($goalMetrics, 'conversion_rate_new_visit');
         $view->idGoal = $idGoal;
+        $view->visitorLogEnabled = Manager::getInstance()->isPluginActivated('Live') && Live::isVisitorLogEnabled($this->idSite);
 
         return $view->render();
     }
@@ -128,6 +128,8 @@ class Controller extends \Piwik\Plugin\Controller
         $this->setGeneralVariablesView($view);
         $this->setGoalOptions($view);
         $view->onlyShowAddNewGoal = true;
+        $view->ecommerceEnabled = $this->site->isEcommerceEnabled();
+        $this->execAndSetResultsForTwigEvents($view);
         return $view->render();
     }
 
@@ -137,7 +139,37 @@ class Controller extends \Piwik\Plugin\Controller
         $this->setGeneralVariablesView($view);
         $this->setEditGoalsViewVariables($view);
         $this->setGoalOptions($view);
+        $this->execAndSetResultsForTwigEvents($view);
         return $view->render();
+    }
+
+    private function execAndSetResultsForTwigEvents(View $view)
+    {
+        if (empty($view->onlyShowAddGoal)) {
+            $beforeGoalListActionsBody = [];
+
+            if ($view->goals) {
+                foreach ($view->goals as $goal) {
+                    $str = '';
+                    Piwik::postEvent('Template.beforeGoalListActionsBody', [&$str, $goal]);
+
+                    $beforeGoalListActionsBody[$goal['idgoal']] = $str;
+                }
+            }
+
+            $view->beforeGoalListActionsBodyEventResult = $beforeGoalListActionsBody;
+
+            $str = '';
+            Piwik::postEvent('Template.beforeGoalListActionsHead', [&$str]);
+            $view->beforeGoalListActionsHead = $str;
+        }
+
+        if (!empty($view->userCanEditGoals)) {
+            $str = '';
+            Piwik::postEvent('Template.endGoalEditTable', [&$str]);
+
+            $view->endEditTable = $str;
+        }
     }
 
     public function hasConversions()
@@ -145,17 +177,16 @@ class Controller extends \Piwik\Plugin\Controller
         $this->checkSitePermission();
 
         $idGoal = Common::getRequestVar('idGoal', '', 'string');
-        $idSite = Common::getRequestVar('idSite', null, 'int');
         $period = Common::getRequestVar('period', null, 'string');
         $date   = Common::getRequestVar('date', null, 'string');
 
-        Piwik::checkUserHasViewAccess($idSite);
+        Piwik::checkUserHasViewAccess($this->idSite);
 
         $conversions = new Conversions();
 
         Json::sendHeaderJSON();
 
-        $numConversions = $conversions->getConversionForGoal($idGoal, $idSite, $period, $date);
+        $numConversions = $conversions->getConversionForGoal($idGoal, $this->idSite, $period, $date);
 
         return json_encode($numConversions > 0);
     }
@@ -174,10 +205,11 @@ class Controller extends \Piwik\Plugin\Controller
         }
 
         if (empty($idGoal)) {
-            $idGoal = Common::getRequestVar('idGoal', false, 'string');
+            $idGoal = Common::getRequestVar('idGoal', '', 'string');
         }
-        $view = $this->getLastUnitGraph($this->pluginName, __FUNCTION__, 'Goals.get');
+        $view = $this->getLastUnitGraph($this->pluginName, __FUNCTION__, 'Goals.get', ['format_metrics' => 0]);
         $view->requestConfig->request_parameters_to_modify['idGoal'] = $idGoal;
+        $view->requestConfig->request_parameters_to_modify['showAllGoalSpecificMetrics'] = 1;
 
         $nameToLabel = $this->goalColumnNameToLabel;
         if ($idGoal == Piwik::LABEL_ID_GOAL_IS_ECOMMERCE_ORDER) {
@@ -190,26 +222,26 @@ class Controller extends \Piwik\Plugin\Controller
         }
 
         $selectableColumns = array('nb_conversions', 'conversion_rate', 'revenue');
+        $goalSelectableColumns = $selectableColumns;
         if ($this->site->isEcommerceEnabled()) {
             $selectableColumns[] = 'items';
             $selectableColumns[] = 'avg_order_revenue';
         }
 
         foreach (array_merge($columns ? $columns : array(), $selectableColumns) as $columnName) {
-            $columnTranslation = '';
-            // find the right translation for this column, eg. find 'revenue' if column is Goal_1_revenue
-            foreach ($nameToLabel as $metric => $metricTranslation) {
-                if (strpos($columnName, $metric) !== false) {
-                    $columnTranslation = $this->translator->translate($metricTranslation);
-                    break;
+            $columnTranslation = $this->getColumnTranslation($nameToLabel, $columnName, $idGoal);
+            $view->config->addTranslation($columnName, $columnTranslation);
+        }
+
+        if ($idGoal === '') {
+            foreach ($this->goals as $aGoal) {
+                foreach ($goalSelectableColumns as $goalColumn) {
+                    $goalMetricName = Goals::makeGoalColumn($aGoal['idgoal'], $goalColumn);
+                    $selectableColumns[] = $goalMetricName;
+                    $columnTranslation = $this->getColumnTranslation($nameToLabel, $goalColumn, $aGoal['idgoal']);
+                    $view->config->addTranslation($goalMetricName, $columnTranslation);
                 }
             }
-
-            if (!empty($idGoal) && isset($this->goals[$idGoal])) {
-                $goalName = $this->goals[$idGoal]['name'];
-                $columnTranslation = "$columnTranslation (" . $this->translator->translate('Goals_GoalX', "$goalName") . ")";
-            }
-            $view->config->translations[$columnName] = $columnTranslation;
         }
 
         if (!empty($columns)) {
@@ -223,14 +255,62 @@ class Controller extends \Piwik\Plugin\Controller
         $langString = $idGoal ? 'Goals_SingleGoalOverviewDocumentation' : 'Goals_GoalsOverviewDocumentation';
         $view->config->documentation = $this->translator->translate($langString, '<br />');
 
+        if ($view instanceof Evolution) {
+            $view->requestConfig->request_parameters_to_modify['format_metrics'] = 0;
+        }
+
         return $this->renderView($view);
+    }
+
+    public function getSparklines()
+    {
+        $content = "";
+        $goals = Request::processRequest('Goals.getGoals', ['idSite' => $this->idSite, 'filter_limit' => '-1'], []);
+
+        foreach ($goals as $goal) {
+            $params = [
+                'idGoal' => $goal['idgoal'],
+                'allow_multiple' => (int) $goal['allow_multiple'],
+                'only_summary' => 1,
+            ];
+
+            \Piwik\Context::executeWithQueryParameters($params, function () use (&$content, $goal) {
+                //load Visualisations Sparkline
+                $view = ViewDataTableFactory::build(Sparklines::ID, 'Goals.getMetrics', 'Goals.' . __METHOD__, true);
+                $view->config->show_title = true;
+                $view->config->custom_parameters = [
+                    'idGoal' => $goal['idgoal'],
+                ];
+                $content .= $view->render();
+            });
+        }
+
+        return $content;
+    }
+
+    private function getColumnTranslation($nameToLabel, $columnName, $idGoal)
+    {
+        $columnTranslation = '';
+        // find the right translation for this column, eg. find 'revenue' if column is Goal_1_revenue
+        foreach ($nameToLabel as $metric => $metricTranslation) {
+            if (strpos($columnName, $metric) !== false) {
+                $columnTranslation = $this->translator->translate($metricTranslation);
+                break;
+            }
+        }
+
+        if (!empty($idGoal)
+            && isset($this->goals[$idGoal])
+        ) {
+            $goalName = $this->goals[$idGoal]['name'];
+            $columnTranslation = "$columnTranslation (" . $this->translator->translate('Goals_GoalX', "$goalName") . ")";
+        }
+
+        return $columnTranslation;
     }
 
     protected function getTopDimensions($idGoal)
     {
-        $columnNbConversions = 'goal_' . $idGoal . '_nb_conversions';
-        $columnConversionRate = 'goal_' . $idGoal . '_conversion_rate';
-
         $topDimensionsToLoad = array();
 
         if (\Piwik\Plugin\Manager::getInstance()->isPluginActivated('UserCountry')) {
@@ -247,19 +327,45 @@ class Controller extends \Piwik\Plugin\Controller
                 'website' => 'Referrers.getWebsites',
             );
         }
+
+        $topDimensionsToLoad += array(
+            'entry_page' => 'Actions.getEntryPageUrls',
+        );
+
         $topDimensions = array();
         foreach ($topDimensionsToLoad as $dimensionName => $apiMethod) {
-            $request = new Request("method=$apiMethod
-                                   &format=original
-                                   &filter_update_columns_when_show_all_goals=1
-                                   &idGoal=" . AddColumnsProcessedMetricsGoal::GOALS_FULL_TABLE . "
-                                   &filter_sort_order=desc
-                                   &filter_sort_column=$columnNbConversions" .
-                // select a couple more in case some are not valid (ie. conversions==0 or they are "Keyword not defined")
-                "&filter_limit=" . (self::COUNT_TOP_ROWS_TO_DISPLAY + 2));
+            if ($apiMethod == 'Actions.getEntryPageUrls') {
+                $columnNbConversions = 'goal_' . $idGoal . '_nb_conversions_entry';
+                $columnConversionRate = 'goal_' . $idGoal . '_nb_conversions_entry_rate';
+                $idGoalToProcess = AddColumnsProcessedMetricsGoal::GOALS_ENTRY_PAGES;
+            } else {
+                $columnNbConversions = 'goal_' . $idGoal . '_nb_conversions';
+                $columnConversionRate = 'goal_' . $idGoal . '_conversion_rate';
+                $idGoalToProcess = AddColumnsProcessedMetricsGoal::GOALS_FULL_TABLE;
+            }
+
+            $requestString = "method=$apiMethod
+                               &format=original
+                               &format_metrics=0
+                               &filter_update_columns_when_show_all_goals=1
+                               &idGoal=$idGoalToProcess
+                               &filter_sort_order=desc
+                               &filter_sort_column=$columnNbConversions
+                               &showColumns=label,$columnNbConversions,$columnConversionRate" .
+                               // select a couple more in case some are not valid (ie. conversions==0 or they are "Keyword not defined")
+                               "&filter_limit=" . (self::COUNT_TOP_ROWS_TO_DISPLAY + 2);
+
+            if ($apiMethod == 'Actions.getEntryPageUrls') {
+                $requestString .= '&flat=1';
+            }
+
+            $request = new Request($requestString);
+
             $datatable = $request->process();
+            $formatter = new Formatter();
             $topDimension = array();
             $count = 0;
+
             foreach ($datatable->getRows() as $row) {
                 $conversions = $row->getColumn($columnNbConversions);
                 if ($conversions > 0
@@ -271,8 +377,8 @@ class Controller extends \Piwik\Plugin\Controller
                 ) {
                     $topDimension[] = array(
                         'name'            => $row->getColumn('label'),
-                        'nb_conversions'  => $conversions,
-                        'conversion_rate' => $this->formatConversionRate($row->getColumn($columnConversionRate)),
+                        'nb_conversions'  => $formatter->getPrettyNumber($conversions),
+                        'conversion_rate' => $formatter->getPrettyPercentFromQuotient($row->getColumn($columnConversionRate)),
                         'metadata'        => $row->getMetadata(),
                     );
                     $count++;
@@ -283,11 +389,13 @@ class Controller extends \Piwik\Plugin\Controller
         return $topDimensions;
     }
 
-    protected function getMetricsForGoal($idGoal)
+    protected function getMetricsForGoal($idGoal, $dataRow = null)
     {
-        $request = new Request("method=Goals.get&format=original&idGoal=$idGoal");
-        $datatable = $request->process();
-        $dataRow = $datatable->getFirstRow();
+        if (!$dataRow) {
+            $request = new Request("method=Goals.get&format=original&idGoal=$idGoal");
+            $datatable = $request->process();
+            $dataRow = $datatable->getFirstRow();
+        }
         $nbConversions = $dataRow->getColumn('nb_conversions');
         $nbVisitsConverted = $dataRow->getColumn('nb_visits_converted');
         // Backward compatibility before 1.3, this value was not processed
@@ -326,6 +434,11 @@ class Controller extends \Piwik\Plugin\Controller
     private function setEditGoalsViewVariables($view)
     {
         $goals = $this->goals;
+
+        foreach ($goals as &$goal) {
+            $goal['revenue_pretty'] = NumberFormatter::getInstance()->formatCurrency($goal['revenue'], Site::getCurrencySymbolFor($this->idSite));
+        }
+
         $view->goals = $goals;
 
         $idGoal = Common::getRequestVar('idGoal', 0, 'int');
@@ -334,15 +447,6 @@ class Controller extends \Piwik\Plugin\Controller
             $view->idGoal = $idGoal;
         }
 
-        // unsanitize goal names and other text data (not done in API so as not to break
-        // any other code/cause security issues)
-
-        foreach ($goals as &$goal) {
-            $goal['name'] = Common::unsanitizeInputValue($goal['name']);
-            if (isset($goal['pattern'])) {
-                $goal['pattern'] = Common::unsanitizeInputValue($goal['pattern']);
-            }
-        }
         $view->goalsJSON = json_encode($goals);
         $view->ecommerceEnabled = $this->site->isEcommerceEnabled();
     }
@@ -360,6 +464,7 @@ class Controller extends \Piwik\Plugin\Controller
             array('key' => 'event', 'value' => Piwik::translate('Goals_SendEvent')),
             array('key' => 'file', 'value' => Piwik::translate('Goals_Download')),
             array('key' => 'external_website', 'value' => Piwik::translate('Goals_ClickOutlink')),
+            ['key' => 'visit_duration', 'value' => Piwik::translate('Goals_VisitDurationMatchAttr')],
         );
         $view->allowMultipleOptions = array(
             array('key' => '0', 'value' => Piwik::translate('Goals_DefaultGoalConvertedOncePerVisit')),
@@ -375,6 +480,9 @@ class Controller extends \Piwik\Plugin\Controller
             array('key' => 'exact', 'value' => Piwik::translate('Goals_IsExactly', '')),
             array('key' => 'regex', 'value' => Piwik::translate('Goals_MatchesExpression', ''))
         );
+        $view->numericComparisonTypeOptions = [
+            ['key' => 'greater_than', 'value' => Piwik::translate('General_OperationGreaterThan')],
+        ];
     }
 
     /**

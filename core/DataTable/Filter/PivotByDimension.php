@@ -1,8 +1,8 @@
 <?php
 /**
- * Piwik - free/libre analytics platform
+ * Matomo - free/libre analytics platform
  *
- * @link http://piwik.org
+ * @link https://matomo.org
  * @license http://www.gnu.org/licenses/gpl-3.0.html GPL v3 or later
  *
  */
@@ -10,6 +10,7 @@ namespace Piwik\DataTable\Filter;
 
 use Exception;
 use Piwik\Columns\Dimension;
+use Piwik\Columns\DimensionsProvider;
 use Piwik\Common;
 use Piwik\Config;
 use Piwik\DataTable;
@@ -149,23 +150,27 @@ class PivotByDimension extends BaseFilter
      * @param bool $isFetchingBySegmentEnabled Whether to allow fetching by segment.
      * @throws Exception if pivoting the report by a dimension is unsupported.
      */
-    public function __construct($table, $report, $pivotByDimension, $pivotColumn, $pivotByColumnLimit = false,
-                                $isFetchingBySegmentEnabled = true)
-    {
+    public function __construct(
+        $table,
+        $report,
+        $pivotByDimension,
+        $pivotColumn,
+        $pivotByColumnLimit = false,
+        $isFetchingBySegmentEnabled = true
+    ) {
         parent::__construct($table);
 
         Log::debug("PivotByDimension::%s: creating with [report = %s, pivotByDimension = %s, pivotColumn = %s, "
             . "pivotByColumnLimit = %s, isFetchingBySegmentEnabled = %s]", __FUNCTION__, $report, $pivotByDimension,
             $pivotColumn, $pivotByColumnLimit, $isFetchingBySegmentEnabled);
 
-        $this->pivotColumn = $pivotColumn;
         $this->pivotByColumnLimit = $pivotByColumnLimit ?: self::getDefaultColumnLimit();
         $this->isFetchingBySegmentEnabled = $isFetchingBySegmentEnabled;
 
-        $namesToId = Metrics::getMappingFromNameToId();
-        $this->metricIndexValue = isset($namesToId[$this->pivotColumn]) ? $namesToId[$this->pivotColumn] : null;
+        $this->setPivotColumn($pivotColumn);
 
         $this->setPivotByDimension($pivotByDimension);
+
         $this->setThisReportMetadata($report);
 
         $this->checkSupportedPivot();
@@ -184,7 +189,8 @@ class PivotByDimension extends BaseFilter
 
         // if no pivot column was set, use the first one found in the row
         if (empty($this->pivotColumn)) {
-            $this->pivotColumn = $this->getNameOfFirstNonLabelColumnInTable($table);
+            $firstColumn = $this->getNameOfFirstNonLabelColumnInTable($table);
+            $this->setPivotColumn($firstColumn);
         }
 
         Log::debug("PivotByDimension::%s: pivoting table with pivot column = %s", __FUNCTION__, $this->pivotColumn);
@@ -267,8 +273,21 @@ class PivotByDimension extends BaseFilter
         }
 
         if ($this->isFetchingBySegmentEnabled) {
-            $segmentValue = $row->getColumn('label');
-            return $this->fetchIntersectedWithThisBySegment($table, $segmentValue);
+            $segment = $row->getMetadata('segment');
+            if (empty($segment)) {
+                $segmentValue = $row->getMetadata('segmentValue');
+                if ($segmentValue === false) {
+                    $segmentValue = $row->getColumn('label');
+                }
+
+                $segmentName = $this->thisReportDimensionSegment->getSegment();
+                if (empty($segmentName)) {
+                    throw new \Exception("Invalid segment found when pivoting: " . $this->thisReportDimensionSegment->getName());
+                }
+
+                $segment = $segmentName . "==" . urlencode($segmentValue);
+            }
+            return $this->fetchIntersectedWithThisBySegment($table, $segment);
         }
 
         // should never occur, unless checkSupportedPivot() fails to catch an unsupported pivot
@@ -299,10 +318,8 @@ class PivotByDimension extends BaseFilter
         return $subtable;
     }
 
-    private function fetchIntersectedWithThisBySegment(DataTable $table, $segmentValue)
+    private function fetchIntersectedWithThisBySegment(DataTable $table, $segmentStr)
     {
-        $segmentStr = $this->thisReportDimensionSegment->getSegment() . "==" . urlencode($segmentValue);
-
         // TODO: segment + report API method query params should be stored in DataTable metadata so we don't have to access it here
         $originalSegment = Common::getRequestVar('segment', false);
         if (!empty($originalSegment)) {
@@ -311,13 +328,15 @@ class PivotByDimension extends BaseFilter
 
         Log::debug("PivotByDimension: Fetching intersected with segment '%s'", $segmentStr);
 
-        $params = array('segment' => $segmentStr) + $this->getRequestParamOverride($table);
+        $params = array_merge($this->pivotDimensionReport->getParameters() ?: [], ['segment' => $segmentStr]);
+        $params = $params + $this->getRequestParamOverride($table);
         return $this->pivotDimensionReport->fetch($params);
     }
 
     private function setPivotByDimension($pivotByDimension)
     {
-        $this->pivotByDimension = Dimension::factory($pivotByDimension);
+        $factory = new DimensionsProvider();
+        $this->pivotByDimension = $factory->factory($pivotByDimension);
         if (empty($this->pivotByDimension)) {
             throw new Exception("Invalid dimension '$pivotByDimension'.");
         }
@@ -327,12 +346,19 @@ class PivotByDimension extends BaseFilter
 
     private function setThisReportMetadata($report)
     {
-        list($module, $method) = explode('.', $report);
-
-        $this->thisReport = ReportsProvider::factory($module, $method);
-        if (empty($this->thisReport)) {
-            throw new Exception("Unable to find report '$report'.");
+        if (is_string($report)) {
+            list($module, $action) = explode('.', $report);
+            $report = ReportsProvider::factory($module, $action);
+            if (empty($report)) {
+                throw new \Exception("Unable to find report '$module.$action'.");
+            }
         }
+
+        if (empty($report)) {
+            throw new \Exception("This report does not support pivot.");
+        }
+
+        $this->thisReport = $report;
 
         $this->subtableDimension = $this->thisReport->getSubtableDimension();
 
@@ -345,7 +371,7 @@ class PivotByDimension extends BaseFilter
 
     private function checkSupportedPivot()
     {
-        $reportId = $this->thisReport->getModule() . '.' . $this->thisReport->getName();
+        $reportId = $this->thisReport->getModule() . '.' . $this->thisReport->getAction();
 
         if (!$this->isFetchingBySegmentEnabled) {
             // if fetching by segment is disabled, then there must be a subtable for the current report and
@@ -384,7 +410,7 @@ class PivotByDimension extends BaseFilter
     }
 
     /**
-     * @param $columnRow
+     * @param Row $columnRow
      * @param $pivotColumn
      * @return false|mixed
      */
@@ -447,7 +473,12 @@ class PivotByDimension extends BaseFilter
     private function getPivotTableDefaultRowFromColumnSummary($columnSet, $othersRowLabel)
     {
         // sort columns by sum (to ensure deterministic ordering)
-        arsort($columnSet);
+        uksort($columnSet, function ($key1, $key2) use ($columnSet) {
+            if ($columnSet[$key1] == $columnSet[$key2]) {
+                return strcmp($key1, $key2);
+            }
+            return $columnSet[$key2] > $columnSet[$key1] ? 1 : -1;
+        });
 
         // limit columns if necessary (adding aggregate Others column at end)
         if ($this->pivotByColumnLimit > 0
@@ -458,7 +489,9 @@ class PivotByDimension extends BaseFilter
         }
 
         // remove column sums from array so it can be used as a default row
-        $columnSet = array_map(function () { return false; }, $columnSet);
+        $columnSet = array_map(function () {
+            return false;
+        }, $columnSet);
 
         // make sure label column is first
         $columnSet = array('label' => false) + $columnSet;
@@ -547,5 +580,13 @@ class PivotByDimension extends BaseFilter
     private static function areDimensionsNotEqualAndNotNull($lhs, $rhs)
     {
         return !empty($lhs) && !empty($rhs) && $lhs->getId() != $rhs->getId();
+    }
+
+    private function setPivotColumn($pivotColumn)
+    {
+        $this->pivotColumn = $pivotColumn;
+
+        $namesToId = Metrics::getMappingFromNameToId();
+        $this->metricIndexValue = isset($namesToId[$this->pivotColumn]) ? $namesToId[$this->pivotColumn] : null;
     }
 }
