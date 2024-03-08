@@ -128,8 +128,10 @@ class Scheduler
                 $taskName = $task->getName();
 
                 if (!$this->acquireLockForTask($taskName, $task->getTTL())) {
-                    $this->logger->debug("Scheduler: '{task}' is currently executed by another process",
-                        ['task' => $task->getName()]);
+                    $this->logger->debug(
+                        "Scheduler: '{task}' is currently executed by another process",
+                        ['task' => $task->getName()]
+                    );
                     continue;
                 }
 
@@ -175,16 +177,20 @@ class Scheduler
                             // Task has already been retried three times, give up
                             $this->timetable->clearRetryCount($taskName);
 
-                            $this->logger->warning("Scheduler: '{task}' has already been retried three times, giving up",
-                                ['task' => $taskName]);
+                            $this->logger->warning(
+                                "Scheduler: '{task}' has already been retried three times, giving up",
+                                ['task' => $taskName]
+                            );
                         } else {
 
                             $readFromOption = true;
                             $rescheduledDate = $this->timetable->rescheduleTaskAndRunInOneHour($task);
                             $this->timetable->incrementRetryCount($taskName);
 
-                            $this->logger->info("Scheduler: '{task}' retry scheduled for {date}",
-                                ['task' => $taskName, 'date' => $rescheduledDate]);
+                            $this->logger->info(
+                                "Scheduler: '{task}' retry scheduled for {date}",
+                                ['task' => $taskName, 'date' => $rescheduledDate]
+                            );
                         }
                         $this->scheduleRetry = false;
                     } else {
@@ -347,8 +353,10 @@ class Scheduler
             call_user_func($callable, $task->getMethodParameter());
             $message = $timer->__toString();
         } catch (\Exception $e) {
-            $this->logger->error("Scheduler: Error {errorMessage} for task '{task}'",
-                ['errorMessage' => $e->getMessage(), 'task' => $task->getName()]);
+            $this->logger->error(
+                "Scheduler: Error {errorMessage} for task '{task}'",
+                ['errorMessage' => $e->getMessage(), 'task' => $task->getName()]
+            );
             $message = 'ERROR: ' . $e->getMessage();
 
             // If the task has indicated that retrying on exception is safe then flag for rescheduling

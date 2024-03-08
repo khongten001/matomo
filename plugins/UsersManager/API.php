@@ -23,12 +23,14 @@ use Piwik\Date;
 use Piwik\NoAccessException;
 use Piwik\Option;
 use Piwik\Piwik;
+use Piwik\Plugins\CoreAdminHome\Emails\AnonymousAccessEnabledEmail;
 use Piwik\Plugins\CoreAdminHome\Emails\UserDeletedEmail;
 use Piwik\Plugins\Login\PasswordVerifier;
 use Piwik\Plugins\UsersManager\Emails\UserInfoChangedEmail;
 use Piwik\Plugins\UsersManager\Repository\UserRepository;
 use Piwik\Plugins\UsersManager\Validators\AllowedEmailDomain;
 use Piwik\Plugins\UsersManager\Validators\Email;
+use Piwik\Request;
 use Piwik\SettingsPiwik;
 use Piwik\Site;
 use Piwik\Tracker\Cache;
@@ -1088,11 +1090,12 @@ class API extends \Piwik\Plugin\API
      *                              May also be an array to sent additional capabilities
      * @param int|array $idSites The array of idSites on which to apply the access level for the user.
      *       If the value is "all" then we apply the access level to all the websites ID for which the current authentificated user has an 'admin' access.
+     * @param string $passwordConfirmation password confirmation. only required when setting view access for anonymous user through session auth
      * @throws Exception if the user doesn't exist
      * @throws Exception if the access parameter doesn't have a correct value
      * @throws Exception if any of the given website ID doesn't exist
      */
-    public function setUserAccess($userLogin, $access, $idSites)
+    public function setUserAccess($userLogin, $access, $idSites, $passwordConfirmation = null)
     {
         UsersManager::dieIfUsersAdminIsDisabled();
 
@@ -1101,6 +1104,11 @@ class API extends \Piwik\Plugin\API
         }
 
         $idSites = $this->getIdSitesCheckAdminAccess($idSites);
+
+        // check password confirmation only when using session auth and setting view access for anonymous user
+        if ($userLogin === 'anonymous' && Request::fromRequest()->getBoolParameter('force_api_session', false) && $access === 'view') {
+            $this->confirmCurrentUserPassword($passwordConfirmation);
+        }
 
         if (
             $userLogin === 'anonymous' &&
@@ -1152,6 +1160,27 @@ class API extends \Piwik\Plugin\API
 
         if (!empty($capabilities)) {
             $this->addCapabilities($userLogin, $capabilities, $idSites);
+        }
+
+        // Send notification to all super users if anonymous access is set for a site
+        if ($userLogin === 'anonymous' && $access === 'view') {
+            $container = StaticContainer::getContainer();
+
+            $siteNames = [];
+
+            foreach ($idSites as $idSite) {
+                $siteNames[] = Site::getNameFor($idSite);
+            }
+
+            $superUsers = Piwik::getAllSuperUserAccessEmailAddresses();
+            foreach ($superUsers as $login => $email) {
+                $email = $container->make(AnonymousAccessEnabledEmail::class, array(
+                    'login' => $login,
+                    'emailAddress' => $email,
+                    'siteName' => implode(', ', $siteNames)
+                ));
+                $email->safeSend();
+            }
         }
 
         // we reload the access list which doesn't yet take in consideration this new user access
@@ -1535,8 +1564,6 @@ class API extends \Piwik\Plugin\API
 
         return $description;
     }
-
-
 
     /**
      * resend the invite email to user

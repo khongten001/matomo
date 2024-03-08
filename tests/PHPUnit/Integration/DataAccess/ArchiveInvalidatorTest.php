@@ -138,8 +138,14 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         /** @var ArchiveInvalidator $archiveInvalidator */
         $archiveInvalidator = self::$fixture->piwikEnvironment->getContainer()->get('Piwik\Archive\ArchiveInvalidator');
 
-        $archiveInvalidator->markArchivesAsInvalidated([1], ['2020-03-03'], 'day',
-            null, $cascadeDown = true, false);
+        $archiveInvalidator->markArchivesAsInvalidated(
+            [1],
+            ['2020-03-03'],
+            'day',
+            null,
+            $cascadeDown = true,
+            false
+        );
 
         $invalidatedArchives = $this->getInvalidatedArchives();
         $this->assertEmpty($invalidatedArchives);
@@ -453,6 +459,40 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         $this->assertSameReports($this->getRememberedReportsByDate(), $reports);
     }
 
+    public function test_getRememberedArchivedReportsThatShouldBeInvalidatedBySite(): void
+    {
+        $this->rememberReportsForManySitesAndDates();
+
+        $idSite = 2;
+        $reports = $this->invalidator->getRememberedArchivedReportsThatShouldBeInvalidated($idSite);
+        $allReports = $this->getRememberedReportsByDate();
+
+        foreach ($allReports as $day => $idSites) {
+            if (!in_array($idSite, $idSites)) {
+                self::assertArrayNotHasKey($day, $reports);
+            } else {
+                self::assertSame([$idSite], $reports[$day]);
+            }
+        }
+    }
+
+    public function test_getDaysWithRememberedInvalidationsForSite(): void
+    {
+        $this->rememberReportsForManySitesAndDates();
+
+        $idSite = 2;
+        $days = $this->invalidator->getDaysWithRememberedInvalidationsForSite($idSite);
+        $allReports = $this->getRememberedReportsByDate();
+
+        foreach ($allReports as $day => $idSites) {
+            if (!in_array($idSite, $idSites)) {
+                self::assertNotContains($day, $days);
+            } else {
+                self::assertContains($day, $days);
+            }
+        }
+    }
+
     private function assertSameReports($expected, $actual)
     {
         $keys1 = array_keys($expected);
@@ -603,8 +643,16 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
 
         /** @var ArchiveInvalidator $archiveInvalidator */
         $archiveInvalidator = self::$fixture->piwikEnvironment->getContainer()->get('Piwik\Archive\ArchiveInvalidator');
-        $result = $archiveInvalidator->markArchivesAsInvalidated(array(1), array($dateBeforeThreshold), 'day',
-            null, false, false, null, true);
+        $result = $archiveInvalidator->markArchivesAsInvalidated(
+            array(1),
+            array($dateBeforeThreshold),
+            'day',
+            null,
+            false,
+            false,
+            null,
+            true
+        );
 
         $this->assertEquals($thresholdDate->toString(), $result->minimumDateWithLogs);
 
@@ -1730,8 +1778,16 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         ];
         $plugin = 'ExamplePlugin';
 
-        $this->test_markArchivesAsInvalidated_MarksCorrectArchivesAsInvalidated($idSites, $dates, $period, $segment, $cascadeDown, $expectedIdArchives,
-            $expectedInvalidatedArchives, $plugin);
+        $this->test_markArchivesAsInvalidated_MarksCorrectArchivesAsInvalidated(
+            $idSites,
+            $dates,
+            $period,
+            $segment,
+            $cascadeDown,
+            $expectedIdArchives,
+            $expectedInvalidatedArchives,
+            $plugin
+        );
     }
 
     public function test_markArchivesAsInvalidated_invalidatesIndividualReports()
@@ -1750,8 +1806,16 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
         ];
         $report = 'ExamplePlugin.someReport';
 
-        $this->test_markArchivesAsInvalidated_MarksCorrectArchivesAsInvalidated($idSites, $dates, $period, $segment, $cascadeDown, $expectedIdArchives,
-            $expectedInvalidatedArchives, $report);
+        $this->test_markArchivesAsInvalidated_MarksCorrectArchivesAsInvalidated(
+            $idSites,
+            $dates,
+            $period,
+            $segment,
+            $cascadeDown,
+            $expectedIdArchives,
+            $expectedInvalidatedArchives,
+            $report
+        );
     }
 
     public function test_markArchivesAsInvalidated_doesNotInsertDuplicateInvalidations()
@@ -1785,10 +1849,22 @@ class ArchiveInvalidatorTest extends IntegrationTestCase
 
         $this->insertInvalidations($existingInvalidations);
 
-        $archiveInvalidator->markArchivesAsInvalidated([1], ['2020-03-04', '2020-05-06'], 'week',
-            $segment, $cascadeDown = true, false);
-        $archiveInvalidator->markArchivesAsInvalidated([1], ['2020-05-01'], 'year',
-            $segment, $cascadeDown = false, 'aReport');
+        $archiveInvalidator->markArchivesAsInvalidated(
+            [1],
+            ['2020-03-04', '2020-05-06'],
+            'week',
+            $segment,
+            $cascadeDown = true,
+            false
+        );
+        $archiveInvalidator->markArchivesAsInvalidated(
+            [1],
+            ['2020-05-01'],
+            'year',
+            $segment,
+            $cascadeDown = false,
+            'aReport'
+        );
 
         $expectedInvalidations = [
             array (

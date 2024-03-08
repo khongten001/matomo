@@ -120,6 +120,7 @@ class DataTablePostProcessor
         }
 
         $dataTable = $this->applyGenericFilters($dataTable);
+        $dataTable = $this->applyArchiveStateFilter($dataTable);
         $this->applyComputeProcessedMetrics($dataTable);
         $dataTable = $this->applyComparison($dataTable);
 
@@ -142,6 +143,23 @@ class DataTablePostProcessor
     {
         $dataTable->filter('AddSegmentBySegmentValue', array($this->report));
         $dataTable->filter('ColumnCallbackDeleteMetadata', array('segmentValue'));
+
+        return $dataTable;
+    }
+
+    /**
+     * @param DataTableInterface $dataTable
+     * @return DataTableInterface
+     */
+    public function applyArchiveStateFilter(DataTableInterface $dataTable): DataTableInterface
+    {
+        $fetchArchiveState = (new \Piwik\Request($this->request))->getBoolParameter('fetch_archive_state', false);
+
+        if (false === $fetchArchiveState) {
+            $dataTable->filter(function (DataTable $table) {
+                $table->deleteMetadata(DataTable::ARCHIVE_STATE_METADATA_NAME);
+            });
+        }
 
         return $dataTable;
     }
@@ -249,7 +267,11 @@ class DataTablePostProcessor
         $addNormalProcessedMetrics = null;
         try {
             $addNormalProcessedMetrics = Common::getRequestVar(
-                'filter_add_columns_when_show_all_columns', null, 'integer', $this->request);
+                'filter_add_columns_when_show_all_columns',
+                null,
+                'integer',
+                $this->request
+            );
         } catch (Exception $ex) {
             // ignore
         }
@@ -261,7 +283,11 @@ class DataTablePostProcessor
         $addGoalProcessedMetrics = null;
         try {
             $addGoalProcessedMetrics = Common::getRequestVar(
-                'filter_update_columns_when_show_all_goals', false, 'string', $this->request);
+                'filter_update_columns_when_show_all_goals',
+                false,
+                'string',
+                $this->request
+            );
             if ((int) $addGoalProcessedMetrics === 0
                 && $addGoalProcessedMetrics !== '0'
                 && $addGoalProcessedMetrics != Piwik::LABEL_ID_GOAL_IS_ECOMMERCE_ORDER

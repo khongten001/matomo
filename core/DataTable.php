@@ -224,10 +224,6 @@ class DataTable implements DataTableInterface, \IteratorAggregate, \ArrayAccess
 
     const ROW_IDENTIFIER_METADATA_NAME = 'rowIdentifier';
 
-    const ID_ARCHIVE_STATE_COMPLETE = 'complete';
-    const ID_ARCHIVE_STATE_INCOMPLETE = 'incomplete';
-    const ID_ARCHIVE_STATE_INVALIDATED = 'invalidated';
-
     /**
      * Maximum nesting level.
      */
@@ -842,7 +838,10 @@ class DataTable implements DataTableInterface, \IteratorAggregate, \ArrayAccess
                 $this->addSummaryRow(new Row(array(Row::COLUMNS => $columns)));
             } else {
                 $this->summaryRow->sumRow(
-                    $row, $enableCopyMetadata = false, $this->getMetadata(self::COLUMN_AGGREGATION_OPS_METADATA_NAME));
+                    $row,
+                    $enableCopyMetadata = false,
+                    $this->getMetadata(self::COLUMN_AGGREGATION_OPS_METADATA_NAME)
+                );
             }
             return $this->summaryRow;
         }
@@ -1360,7 +1359,8 @@ class DataTable implements DataTableInterface, \IteratorAggregate, \ArrayAccess
         }
 
         if (!is_null($maximumRowsInDataTable)) {
-            $this->filter('Truncate',
+            $this->filter(
+                'Truncate',
                 array($maximumRowsInDataTable - 1,
                       DataTable::LABEL_SUMMARY_ROW,
                       $columnToSortByBeforeTruncation,
@@ -1991,7 +1991,8 @@ class DataTable implements DataTableInterface, \IteratorAggregate, \ArrayAccess
     {
         $labelToLookFor = $row->getColumn('label');
         if ($labelToLookFor === false) {
-            $message = sprintf("Label column not found in the table to add in addDataTable(). Row: %s",
+            $message = sprintf(
+                "Label column not found in the table to add in addDataTable(). Row: %s",
                 var_export($row->getColumns(), 1)
             );
             throw new Exception($message);

@@ -277,6 +277,7 @@ class PluginsTest extends IntegrationTestCase
                     'https://plugins.piwik.org/Barometer/images/0.5.0/piwik-barometer-01.png',
                     'https://plugins.piwik.org/Barometer/images/0.5.0/piwik-barometer-02.png',
                 ],
+            'coverImage' => 'https://plugins.piwik.org/img/categories/insights.png',
             'previews' =>
                  [ [
                     'type' => 'demo',
@@ -307,9 +308,10 @@ class PluginsTest extends IntegrationTestCase
                 'url' => 'http://plugins.piwik.org/Barometer/changelog'
             ],
             'canBePurchased' => false,
+            'isEligibleForFreeTrial' => false,
             'priceFrom' => null,
-            'previewImage' => 'plugins/Marketplace/images/previews/generic-plugin.png',
             'numDownloadsPretty' => 0,
+            'category' => 'customisation',
         ];
         $this->assertEquals($expected, $plugin);
     }
@@ -318,6 +320,46 @@ class PluginsTest extends IntegrationTestCase
     {
         $this->plugins->getPluginInfo('Barometer');
         $this->assertSame('plugins/Barometer/info', $this->service->action);
+    }
+
+    /**
+     * @dataProvider getPluginInfoShouldSetFreeTrialEligibilityTestData
+     */
+    public function testGetPluginInfoShouldSetFreeTrialEligibility(
+        string $pluginName,
+        string $fixtureName,
+        bool $isEligibleForFreeTrial
+    ): void {
+        $this->service->returnFixture($fixtureName);
+
+        $plugin = $this->plugins->getPluginInfo($pluginName);
+
+        self::assertArrayHasKey('isEligibleForFreeTrial', $plugin);
+        self::assertSame($isEligibleForFreeTrial, $plugin['isEligibleForFreeTrial']);
+    }
+
+    /**
+     * @return iterable<string, array<string>>
+     */
+    public function getPluginInfoShouldSetFreeTrialEligibilityTestData(): iterable
+    {
+        yield 'free plugin' => [
+            'Barometer',
+            'v2.0_plugins_Barometer_info.json',
+            false,
+        ];
+
+        yield 'paid plugin, no prior license' => [
+            'PaidPlugin1',
+            'v2.0_plugins_PaidPlugin1_info.json',
+            true,
+        ];
+
+        yield 'paid plugin, with prior license' => [
+            'PaidPlugin1',
+            'v2.0_plugins_PaidPlugin1_info-access_token-consumer3_paid1_custom2.json',
+            false,
+        ];
     }
 
     public function testSearchPlugins_WithSearchAndNoPluginsFound_shouldCallCorrectApi()

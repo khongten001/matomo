@@ -36,7 +36,8 @@ class Row extends \ArrayObject
     private static $unsummableColumns = array(
         'label' => true,
         'full_url' => true, // column used w/ old Piwik versions,
-        'ts_archived' => true // date column used in metadata for proportional tooltips
+        DataTable::ARCHIVED_DATE_METADATA_NAME => true, // date column used in metadata for proportional tooltips
+        DataTable::ARCHIVE_STATE_METADATA_NAME => true,
     );
 
     // @see sumRow - implementation detail
@@ -584,9 +585,11 @@ class Row extends \ArrayObject
             }
 
             // We shall update metadata, and keep the metadata with the _most visits or pageviews_, rather than first or last seen
-            $visits = max($rowToSum->getColumn(Metrics::INDEX_PAGE_NB_HITS) || $rowToSum->getColumn(Metrics::INDEX_NB_VISITS),
+            $visits = max(
+                $rowToSum->getColumn(Metrics::INDEX_PAGE_NB_HITS) || $rowToSum->getColumn(Metrics::INDEX_NB_VISITS),
                 // Old format pre-1.2, @see also method doSumVisitsMetrics()
-                $rowToSum->getColumn('nb_actions') || $rowToSum->getColumn('nb_visits'));
+                $rowToSum->getColumn('nb_actions') || $rowToSum->getColumn('nb_visits')
+            );
             if (($visits && $visits > $this->maxVisitsSummed)
                 || empty($this->metadata)
             ) {
@@ -663,8 +666,13 @@ class Row extends \ArrayObject
                 $label = $this->getColumn('label');
                 $thisColumnDescription = $this->getColumnValueDescriptionForError($thisColumnValue);
                 $columnToSumValueDescription = $this->getColumnValueDescriptionForError($columnToSumValue);
-                throw new \Exception(sprintf('Trying to sum unsupported operands for column %s in row with label = %s: %s + %s',
-                    $columnName, $label, $thisColumnDescription, $columnToSumValueDescription));
+                throw new \Exception(sprintf(
+                    'Trying to sum unsupported operands for column %s in row with label = %s: %s + %s',
+                    $columnName,
+                    $label,
+                    $thisColumnDescription,
+                    $columnToSumValueDescription
+                ));
             }
 
             return $thisColumnValue + $columnToSumValue;

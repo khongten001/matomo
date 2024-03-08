@@ -140,13 +140,15 @@ class API extends \Piwik\Plugin\API
                 APISitesManager::getInstance()->getSitesWithAtLeastViewAccess($limit = false, $_restrictSitesToLogin);
             }
         } else {
-            $sites = Request::processRequest('SitesManager.getPatternMatchSites',
+            $sites = Request::processRequest(
+                'SitesManager.getPatternMatchSites',
                 array('pattern'   => $pattern,
                       // added because caller could overwrite these
                       'limit'       => SettingsPiwik::getWebsitesCountToDisplay(),
                       'showColumns' => '',
                       'hideColumns' => '',
-                      'format'      => 'original'));
+                'format'      => 'original')
+            );
 
             if (!empty($sites)) {
                 Site::setSitesFromArray($sites);
@@ -349,9 +351,10 @@ class API extends \Piwik\Plugin\API
             );
         }
 
-        // Remove <ts_archived> row metadata, it's already been used by any filters that needed it
+        // Remove unnecessary row metadata already been used by any filters that needed them
         $dataTable->queueFilter(function ($dataTable) {
             $dataTable->deleteRowsMetadata(DataTable::ARCHIVED_DATE_METADATA_NAME);
+            $dataTable->deleteRowsMetadata(DataTable::ARCHIVE_STATE_METADATA_NAME);
             $dataTable->deleteColumn('_metadata');
         });
 

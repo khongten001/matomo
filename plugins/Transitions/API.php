@@ -243,7 +243,12 @@ class API extends \Piwik\Plugin\API
     {
 
         $data = $this->queryFollowingActions(
-            $idaction, $actionType, $logAggregator, $limitBeforeGrouping, $includeLoops);
+            $idaction,
+            $actionType,
+            $logAggregator,
+            $limitBeforeGrouping,
+            $includeLoops
+        );
 
         foreach ($data as $tableName => $table) {
             $report[$tableName] = $table;
@@ -373,7 +378,7 @@ class API extends \Piwik\Plugin\API
         // the ranking query.
         $dimensions = array('referrer_data' => 'CASE log_visit.referer_type
 				WHEN ' . Common::REFERRER_TYPE_DIRECT_ENTRY . ' THEN \'\'
-				WHEN ' . Common::REFERRER_TYPE_SEARCH_ENGINE . ' THEN log_visit.referer_keyword
+				WHEN ' . Common::REFERRER_TYPE_SEARCH_ENGINE . ' THEN log_visit.referer_name
 				WHEN ' . Common::REFERRER_TYPE_SOCIAL_NETWORK . ' THEN log_visit.referer_name
 				WHEN ' . Common::REFERRER_TYPE_WEBSITE . ' THEN log_visit.referer_url
 				WHEN ' . Common::REFERRER_TYPE_CAMPAIGN . ' THEN CONCAT(log_visit.referer_name, \' \', log_visit.referer_keyword)
@@ -587,7 +592,11 @@ class API extends \Piwik\Plugin\API
     private function addExternalReferrers($logAggregator, &$report, $idaction, $actionType, $limitBeforeGrouping)
     {
         $data = $this->queryExternalReferrers(
-            $idaction, $actionType, $logAggregator, $limitBeforeGrouping);
+            $idaction,
+            $actionType,
+            $logAggregator,
+            $limitBeforeGrouping
+        );
 
         $report['pageMetrics']['entries'] = 0;
         $report['referrers'] = array();

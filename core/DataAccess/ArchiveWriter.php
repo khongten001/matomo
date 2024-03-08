@@ -18,6 +18,7 @@ use Piwik\Date;
 use Piwik\Db;
 use Piwik\Db\BatchInsert;
 use Piwik\Log\LoggerInterface;
+use Piwik\SettingsServer;
 
 /**
  * This class is used to create a new Archive.
@@ -305,8 +306,15 @@ class ArchiveWriter
 
     public function flushSpools()
     {
-        $this->flushSpool('numeric');
-        $this->flushSpool('blob');
+        if (SettingsServer::isArchivePhpTriggered()) {
+            Db::executeWithDatabaseWriterReconnectionAttempt(function () {
+                $this->flushSpool('numeric');
+                $this->flushSpool('blob');
+            });
+        } else {
+            $this->flushSpool('numeric');
+            $this->flushSpool('blob');
+        }
     }
 
     private function flushSpool($valueType)
@@ -374,8 +382,10 @@ class ArchiveWriter
         // if the done flag is not like done%.PluginName, then it shouldn't be a partial archive.
         // log a warning.
         if ($doneValue == self::DONE_PARTIAL && strpos($this->doneFlag, '.') == false) {
-            $ex = new \Exception(sprintf("Trying to create a partial archive w/ an all plugins done flag (done flag = %s). This should not happen.",
-                $this->doneFlag));
+            $ex = new \Exception(sprintf(
+                "Trying to create a partial archive w/ an all plugins done flag (done flag = %s). This should not happen.",
+                $this->doneFlag
+            ));
             StaticContainer::get(LoggerInterface::class)->warning('{exception}', [
                 'exception' => $ex,
             ]);
